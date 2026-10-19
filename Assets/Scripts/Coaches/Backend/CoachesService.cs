@@ -95,6 +95,7 @@ public class XpSourceBonusRule
 public class SynergyBonusRule
 {
     public string[] required = new string[0];
+    public string xp_source;
     public float bonus;
 }
 
@@ -476,12 +477,14 @@ public static class CoachesService
             totalBonus += CalculateCoachRuleBonus(coach, rule);
         }
 
-        // Synergy bonus: only applies when all required coach types are hired.
+        // Synergy bonus: applies only when its source rule matches and all
+        // required coach types are hired.
         if (config.synergy_bonus != null)
         {
             foreach (var synergy in config.synergy_bonus)
             {
                 if (synergy == null || synergy.required == null || synergy.required.Length == 0) continue;
+                if (!string.Equals(synergy.xp_source, normalizedXpSource, StringComparison.OrdinalIgnoreCase)) continue;
                 if (synergy.required.All(t => HasAssignedCoachType(state, t)))
                     totalBonus += synergy.bonus;
             }
