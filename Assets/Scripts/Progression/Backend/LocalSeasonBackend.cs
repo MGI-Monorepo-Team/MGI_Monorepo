@@ -114,7 +114,7 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             var playerTeam = new TeamSaveData
             {
                 team_id = Guid.NewGuid().ToString(),
-                player_id = "local_player",
+                player_id = PlayerIdProvider.Get(),
                 team_name = playerTeamName,
                 rating = 1000,
                 is_player_team = true,
@@ -170,38 +170,29 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
 
             currentSeason.current_week++;
 
-            var random = new System.Random();
             var playerTeam = currentSeason.teams.FirstOrDefault(t => t.is_player_team);
             bool playerWonThisWeek = false;
 
-            // Simulate matches for all teams
-            foreach (var team in currentSeason.teams)
-            {
-                if (team == null || team.stats == null) continue;
+            var reader = new GameOutcomeReader();
+            var teamIds = currentSeason.teams
+                .Where(team => team != null)
+                .Select(team => team.team_id)
+                .ToList();
 
-                if (!team.is_player_team)
+            if (reader.TryGetWeek(currentSeason.season_id, currentSeason.current_week, teamIds,
+                    out var simulatedOutcomes, out var outcomeError))
+            {
+                playerWonThisWeek = ApplySimulatorOutcomes(currentSeason, simulatedOutcomes, playerTeam);
+                Debug.Log($"[LocalSeasonBackend] Applied {simulatedOutcomes.Count} simulator outcomes for week {currentSeason.current_week}.");
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(outcomeError))
                 {
-                    if (random.NextDouble() > 0.5) team.stats.wins++;
-                    else team.stats.losses++;
-                    team.stats.total_matches++;
-                    team.stats.points = team.stats.wins * 2;
+                    Debug.LogWarning($"[LocalSeasonBackend] Ignoring invalid simulator outcomes: {outcomeError}");
                 }
-                else
-                {
-                    // Player team match
-                    bool playerWins = random.NextDouble() > 0.5;
-                    if (playerWins)
-                    {
-                        team.stats.wins++;
-                        playerWonThisWeek = true;
-                    }
-                    else
-                    {
-                        team.stats.losses++;
-                    }
-                    team.stats.total_matches++;
-                    team.stats.points = team.stats.wins * 2; // Simple points calculation
-                }
+
+                playerWonThisWeek = SimulateLocalWeek(currentSeason.teams, playerTeam);
             }
 
             // Award match XP: played (5) + win bonus (+10) or loss bonus (+2)
@@ -233,6 +224,56 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             Debug.LogError(ex);
             onError?.Invoke(ex.Message);
         }
+    }
+
+    private static bool ApplySimulatorOutcomes(SeasonSaveData season, IEnumerable<GameOutcomeRecord> outcomes, TeamSaveData playerTeam)
+    {
+        var teamsById = season.teams.ToDictionary(team => team.team_id);
+        var playerWon = false;
+
+        foreach (var outcome in outcomes)
+        {
+            var home = teamsById[outcome.home_team_id];
+            var away = teamsById[outcome.away_team_id];
+            ApplyMatchResult(home, outcome.winner_team_id == home.team_id);
+            ApplyMatchResult(away, outcome.winner_team_id == away.team_id);
+
+            if (playerTeam != null && outcome.winner_team_id == playerTeam.team_id)
+            {
+                playerWon = true;
+            }
+        }
+
+        return playerWon;
+    }
+
+    private static bool SimulateLocalWeek(IEnumerable<TeamSaveData> teams, TeamSaveData playerTeam)
+    {
+        var random = new System.Random();
+        var playerWon = false;
+
+        foreach (var team in teams)
+        {
+            if (team == null || team.stats == null) continue;
+
+            var won = random.NextDouble() > 0.5;
+            ApplyMatchResult(team, won);
+            if (team == playerTeam)
+            {
+                playerWon = won;
+            }
+        }
+
+        return playerWon;
+    }
+
+    private static void ApplyMatchResult(TeamSaveData team, bool won)
+    {
+        if (won) team.stats.wins++;
+        else team.stats.losses++;
+
+        team.stats.total_matches++;
+        team.stats.points = team.stats.wins * 2;
     }
 
   

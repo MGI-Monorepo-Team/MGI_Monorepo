@@ -149,6 +149,13 @@ public static class TestSuiteRunner
                 Subsystem = "Shared identity -> CCAS, Economy, Facilities, Coaches, Progression",
                 Description = "A non-default active player profile stays consistent across the five game services.",
                 Run = CanonicalPlayerIdIntegrationTests.RunSuite
+            },
+            new SuiteDefinition
+            {
+                Name = "game-outcomes",
+                Subsystem = "Game outcome simulator -> Progression",
+                Description = "Validates complete simulator result weeks before LocalSeasonBackend applies them.",
+                Run = GameOutcomeReaderTests.RunSuite
             }
         };
     }
@@ -255,6 +262,7 @@ public static class TestSuiteRunner
         report.AppendLine("| `CCASFacilitiesCoachesBoundaryIntegrationTests` | CCAS duplicate XP boundary; FacilitiesService and CoachesService must not modify it | Automated Unity integration suite |");
         report.AppendLine("| `CCASSceneSmokeTests` | CCAS scene asset, services, inspector wiring, and core panel navigation | Automated Unity editor smoke suite |");
         report.AppendLine("| `CanonicalPlayerIdIntegrationTests` | PlayerIdProvider -> CCAS, Economy, Facilities, Coaches, Progression | Automated Unity integration suite |");
+        report.AppendLine("| `GameOutcomeReaderTests` | Game outcome simulator output -> LocalSeasonBackend | Automated Unity file-contract suite |");
         report.AppendLine("| `EconomyServiceSmokeTestRunner` | EconomyService wallet, currency, spending, transactions, and events | Manual Play Mode/context-menu diagnostic; does not fail the process |");
         report.AppendLine("| `EconomyServiceJsonOperationsTester` | Economy JSON files | Manual inspector utility |");
         report.AppendLine("| `SystemTester` | SaveLoadLogic, RuntimeValidator, StatusDeltaChecker, CoachManager | Manual coroutine/scene diagnostic |");
@@ -296,7 +304,7 @@ public static class TestSuiteRunner
         report.AppendLine("MGI_TESTS=ccas-economy Unity -batchmode -projectPath <path-to-MGI_Monorepo> -executeMethod TestSuiteRunner.RunSelected -quit -logFile <path-to-log>");
         report.AppendLine("```");
         report.AppendLine();
-        report.AppendLine("Available selections: `progression`, `progression-facilities`, `progression-ccas`, `ccas`, `ccas-progression`, `ccas-economy`, `ccas-boundary`, `ccas-scene-smoke`, `canonical-player-id`, or `all`.");
+        report.AppendLine("Available selections: `progression`, `progression-facilities`, `progression-ccas`, `ccas`, `ccas-progression`, `ccas-economy`, `ccas-boundary`, `ccas-scene-smoke`, `canonical-player-id`, `game-outcomes`, or `all`.");
 
         File.WriteAllText(reportPath, report.ToString());
     }
