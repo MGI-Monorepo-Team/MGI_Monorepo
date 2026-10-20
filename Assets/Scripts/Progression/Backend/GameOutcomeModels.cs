@@ -26,4 +26,5 @@ public class GameOutcomeRecord
     public string winner_team_id;
     public int home_score;
     public int away_score;
+    public int coin_reward;
 }

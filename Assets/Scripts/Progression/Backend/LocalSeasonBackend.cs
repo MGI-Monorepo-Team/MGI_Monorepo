@@ -183,6 +183,7 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                     out var simulatedOutcomes, out var outcomeError))
             {
                 playerWonThisWeek = ApplySimulatorOutcomes(currentSeason, simulatedOutcomes, playerTeam);
+                AwardSimulatorCoinReward(simulatedOutcomes, playerTeam);
                 Debug.Log($"[LocalSeasonBackend] Applied {simulatedOutcomes.Count} simulator outcomes for week {currentSeason.current_week}.");
             }
             else
@@ -274,6 +275,31 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
 
         team.stats.total_matches++;
         team.stats.points = team.stats.wins * 2;
+    }
+
+    private static void AwardSimulatorCoinReward(IEnumerable<GameOutcomeRecord> outcomes, TeamSaveData playerTeam)
+    {
+        if (playerTeam == null || string.IsNullOrWhiteSpace(playerTeam.player_id))
+        {
+            return;
+        }
+
+        var playerOutcome = outcomes.FirstOrDefault(outcome =>
+            outcome.home_team_id == playerTeam.team_id || outcome.away_team_id == playerTeam.team_id);
+        if (playerOutcome == null)
+        {
+            return;
+        }
+
+        if (!GameOutcomeRewardProcessor.TryApplyCoinReward(new EconomyService(), playerOutcome,
+                playerTeam.player_id, out var applied))
+        {
+            Debug.LogWarning($"[LocalSeasonBackend] Could not apply simulator reward for event '{playerOutcome.event_id}'.");
+        }
+        else if (applied)
+        {
+            Debug.Log($"[LocalSeasonBackend] Applied {playerOutcome.coin_reward} coin reward for simulator event '{playerOutcome.event_id}'.");
+        }
     }
 
   

@@ -139,21 +139,51 @@ public class EconomyService
 
     public void AddCurrency(string playerId, int coins, int gems, int coachingCredits, string source)
     {
+        AddCurrencyInternal(playerId, coins, gems, coachingCredits, source, null, out _);
+    }
+
+    /// <summary>
+    /// Adds a reward at most once for a stable domain event. Replaying an imported
+    /// simulator result returns true but leaves the wallet unchanged.
+    /// </summary>
+    public bool TryAddCurrencyOnce(string playerId, int coins, int gems, int coachingCredits,
+        string source, string eventId, out bool applied)
+    {
+        if (string.IsNullOrWhiteSpace(eventId))
+        {
+            Debug.LogWarning("[EconomyService] TryAddCurrencyOnce requires a non-empty eventId.");
+            applied = false;
+            return false;
+        }
+
+        return AddCurrencyInternal(playerId, coins, gems, coachingCredits, source, eventId, out applied);
+    }
+
+    private bool AddCurrencyInternal(string playerId, int coins, int gems, int coachingCredits,
+        string source, string eventId, out bool applied)
+    {
+        applied = false;
         var wallet = GetWallet(playerId, true);
         if (wallet == null)
         {
-            return;
+            return false;
         }
 
         if (coins < 0 || gems < 0 || coachingCredits < 0)
         {
             Debug.LogWarning("[EconomyService] AddCurrency rejected negative input.");
-            return;
+            return false;
         }
 
         if (coins == 0 && gems == 0 && coachingCredits == 0)
         {
-            return;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(eventId) &&
+            LoadTransactions(playerId).Any(transaction => transaction != null && transaction.event_id == eventId))
+        {
+            return true;
         }
 
         wallet.coins += coins;
@@ -164,9 +194,11 @@ public class EconomyService
         PersistWalletAndTransactions(
             playerId,
             wallet,
-            BuildTransactions(playerId, coins, gems, coachingCredits, "earn", source));
+            BuildTransactions(playerId, coins, gems, coachingCredits, "earn", source, eventId));
 
         PublishWalletUpdated(playerId, source, wallet);
+        applied = true;
+        return true;
     }
 
     public bool ResetWallet(string playerId)
@@ -263,7 +295,8 @@ public class EconomyService
         int gems,
         int coachingCredits,
         string type,
-        string source)
+        string source,
+        string eventId = null)
     {
         var list = new List<WalletTransaction>();
         var timestamp = UtcNowIso();
@@ -279,7 +312,8 @@ public class EconomyService
                 currency = "coins",
                 type = type,
                 timestamp = timestamp,
-                source = safeSource
+                source = safeSource,
+                event_id = eventId
             });
         }
 
@@ -293,7 +327,8 @@ public class EconomyService
                 currency = "gems",
                 type = type,
                 timestamp = timestamp,
-                source = safeSource
+                source = safeSource,
+                event_id = eventId
             });
         }
 
@@ -307,7 +342,8 @@ public class EconomyService
                 currency = "coaching_credits",
                 type = type,
                 timestamp = timestamp,
-                source = safeSource
+                source = safeSource,
+                event_id = eventId
             });
         }
 
@@ -468,7 +504,8 @@ public class EconomyService
             currency = transaction.currency,
             type = transaction.type,
             timestamp = string.IsNullOrWhiteSpace(transaction.timestamp) ? UtcNowIso() : transaction.timestamp,
-            source = string.IsNullOrWhiteSpace(transaction.source) ? "unknown_source" : transaction.source
+            source = string.IsNullOrWhiteSpace(transaction.source) ? "unknown_source" : transaction.source,
+            event_id = transaction.event_id
         };
     }
 

@@ -20,4 +20,6 @@ public class WalletTransaction
     public string type;
     public string timestamp;
     public string source;
+    // Optional external event identity used to make imported rewards replay-safe.
+    public string event_id;
 }
