@@ -88,9 +88,21 @@ public static class CCASFacilitiesCoachesBoundaryIntegrationTests
 
         float eligibleCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "win");
         float duplicateCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "duplicate_card_common");
+        float lossCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "match_loss");
+        float seasonRewardCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "season_reward");
+        float trainingCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "training");
+        float recoveryCoachBonus = CoachesService.GetCoachXpBonusPercent(TestPlayerId, "recovery");
         Assert(eligibleCoachBonus > 0f, "Setup: active coaches apply a positive bonus to an eligible win source");
         AssertEqual(0f, duplicateCoachBonus,
             "Boundary: active coaches leave duplicate-card bonus at 0%");
+        AssertEqual(0f, lossCoachBonus,
+            "Boundary: O+D synergy does not apply to match-loss XP");
+        AssertEqual(0f, seasonRewardCoachBonus,
+            "Boundary: O+D synergy does not apply to season-reward XP");
+        AssertEqual(0f, trainingCoachBonus,
+            "Boundary: O+D synergy does not apply to training XP");
+        AssertEqual(0f, recoveryCoachBonus,
+            "Boundary: O+D synergy does not apply to recovery XP");
 
         var fullCollection = catalog.catalog.cards
             .Where(card => card != null && !string.IsNullOrWhiteSpace(card.uid))

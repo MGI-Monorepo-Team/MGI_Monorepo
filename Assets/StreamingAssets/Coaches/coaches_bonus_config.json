@@ -24,6 +24,7 @@
   "synergy_bonus": [
     {
       "required": ["O", "D"],
+      "xp_source": "win",
       "bonus": 0.02
     }
   ]
