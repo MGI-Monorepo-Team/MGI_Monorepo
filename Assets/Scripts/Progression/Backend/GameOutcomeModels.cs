@@ -8,12 +8,16 @@ using System;
 public class GameOutcomeFile
 {
     public string schema_version = "1.0";
+    public string model_version;
+    public string season_id;
+    public int week;
+    public int seed;
     public GameOutcomeRecord[] outcomes = Array.Empty<GameOutcomeRecord>();
 }
 
 /// <summary>
 /// One completed game. Team IDs must match the season's TeamSaveData.team_id values.
-/// event_id is carried forward to Economy so replaying the same output cannot pay twice.
+/// event_id is carried forward to Economy so replaying an approved reward cannot pay twice.
 /// </summary>
 [Serializable]
 public class GameOutcomeRecord
@@ -26,5 +30,4 @@ public class GameOutcomeRecord
     public string winner_team_id;
     public int home_score;
     public int away_score;
-    public int coin_reward;
 }

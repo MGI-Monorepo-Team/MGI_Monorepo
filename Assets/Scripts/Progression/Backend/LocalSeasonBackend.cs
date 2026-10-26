@@ -37,6 +37,11 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
     private static readonly int XP_2ND_PLACE = 30;
     private static readonly int XP_3RD_PLACE = 15;
 
+#if UNITY_EDITOR
+    // Keeps file-contract tests isolated from the real StreamingAssets output.
+    public static Func<GameOutcomeReader> OutcomeReaderFactoryForTests;
+#endif
+
     private void Awake()
     {
         if (_instance != null && _instance != this)
@@ -168,33 +173,26 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 return;
             }
 
-            currentSeason.current_week++;
-
             var playerTeam = currentSeason.teams.FirstOrDefault(t => t.is_player_team);
-            bool playerWonThisWeek = false;
-
-            var reader = new GameOutcomeReader();
+            int nextWeek = currentSeason.current_week + 1;
+            var reader = CreateOutcomeReader();
             var teamIds = currentSeason.teams
                 .Where(team => team != null)
                 .Select(team => team.team_id)
                 .ToList();
 
-            if (reader.TryGetWeek(currentSeason.season_id, currentSeason.current_week, teamIds,
+            if (!reader.TryGetWeek(currentSeason.season_id, nextWeek, teamIds,
                     out var simulatedOutcomes, out var outcomeError))
             {
-                playerWonThisWeek = ApplySimulatorOutcomes(currentSeason, simulatedOutcomes, playerTeam);
-                AwardSimulatorCoinReward(simulatedOutcomes, playerTeam);
-                Debug.Log($"[LocalSeasonBackend] Applied {simulatedOutcomes.Count} simulator outcomes for week {currentSeason.current_week}.");
+                onError?.Invoke(string.IsNullOrEmpty(outcomeError)
+                    ? $"No simulator outcomes are available for week {nextWeek}."
+                    : $"Simulator outcomes are invalid for week {nextWeek}: {outcomeError}");
+                return;
             }
-            else
-            {
-                if (!string.IsNullOrEmpty(outcomeError))
-                {
-                    Debug.LogWarning($"[LocalSeasonBackend] Ignoring invalid simulator outcomes: {outcomeError}");
-                }
 
-                playerWonThisWeek = SimulateLocalWeek(currentSeason.teams, playerTeam);
-            }
+            currentSeason.current_week = nextWeek;
+            bool playerWonThisWeek = ApplySimulatorOutcomes(currentSeason, simulatedOutcomes, playerTeam);
+            Debug.Log($"[LocalSeasonBackend] Applied {simulatedOutcomes.Count} simulator outcomes for week {currentSeason.current_week}.");
 
             // Award match XP: played (5) + win bonus (+10) or loss bonus (+2)
             if (playerTeam != null)
@@ -248,26 +246,6 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
         return playerWon;
     }
 
-    private static bool SimulateLocalWeek(IEnumerable<TeamSaveData> teams, TeamSaveData playerTeam)
-    {
-        var random = new System.Random();
-        var playerWon = false;
-
-        foreach (var team in teams)
-        {
-            if (team == null || team.stats == null) continue;
-
-            var won = random.NextDouble() > 0.5;
-            ApplyMatchResult(team, won);
-            if (team == playerTeam)
-            {
-                playerWon = won;
-            }
-        }
-
-        return playerWon;
-    }
-
     private static void ApplyMatchResult(TeamSaveData team, bool won)
     {
         if (won) team.stats.wins++;
@@ -277,29 +255,13 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
         team.stats.points = team.stats.wins * 2;
     }
 
-    private static void AwardSimulatorCoinReward(IEnumerable<GameOutcomeRecord> outcomes, TeamSaveData playerTeam)
+    private static GameOutcomeReader CreateOutcomeReader()
     {
-        if (playerTeam == null || string.IsNullOrWhiteSpace(playerTeam.player_id))
-        {
-            return;
-        }
-
-        var playerOutcome = outcomes.FirstOrDefault(outcome =>
-            outcome.home_team_id == playerTeam.team_id || outcome.away_team_id == playerTeam.team_id);
-        if (playerOutcome == null)
-        {
-            return;
-        }
-
-        if (!GameOutcomeRewardProcessor.TryApplyCoinReward(new EconomyService(), playerOutcome,
-                playerTeam.player_id, out var applied))
-        {
-            Debug.LogWarning($"[LocalSeasonBackend] Could not apply simulator reward for event '{playerOutcome.event_id}'.");
-        }
-        else if (applied)
-        {
-            Debug.Log($"[LocalSeasonBackend] Applied {playerOutcome.coin_reward} coin reward for simulator event '{playerOutcome.event_id}'.");
-        }
+#if UNITY_EDITOR
+        if (OutcomeReaderFactoryForTests != null)
+            return OutcomeReaderFactoryForTests();
+#endif
+        return new GameOutcomeReader();
     }
 
   

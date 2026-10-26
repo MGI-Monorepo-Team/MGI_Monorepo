@@ -5,21 +5,21 @@ public static class GameOutcomeRewardProcessor
 {
     public const string RewardSource = "simulated_game_outcome";
 
-    public static bool TryApplyCoinReward(EconomyService economy, GameOutcomeRecord outcome,
-        string playerId, out bool applied)
+    public static bool TryApplyCoinReward(EconomyService economy, string eventId,
+        string playerId, int coins, out bool applied)
     {
         applied = false;
-        if (economy == null || outcome == null || string.IsNullOrWhiteSpace(playerId))
+        if (economy == null || string.IsNullOrWhiteSpace(eventId) || string.IsNullOrWhiteSpace(playerId))
         {
             return false;
         }
 
-        if (outcome.coin_reward < 0)
+        if (coins < 0)
         {
             return false;
         }
 
-        return economy.TryAddCurrencyOnce(playerId, outcome.coin_reward, 0, 0,
-            RewardSource, outcome.event_id, out applied);
+        return economy.TryAddCurrencyOnce(playerId, coins, 0, 0,
+            RewardSource, eventId, out applied);
     }
 }

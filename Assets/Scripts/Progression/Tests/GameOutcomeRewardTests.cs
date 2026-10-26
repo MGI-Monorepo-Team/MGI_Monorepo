@@ -53,12 +53,11 @@ public static class GameOutcomeRewardTests
     {
         var outcome = new GameOutcomeRecord
         {
-            event_id = "season-1-week-1-player-game",
-            coin_reward = 250
+            event_id = "season-1-week-1-player-game"
         };
 
-        bool firstAccepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, outcome, TestPlayerId, out var firstApplied);
-        bool secondAccepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, outcome, TestPlayerId, out var secondApplied);
+        bool firstAccepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, outcome.event_id, TestPlayerId, 250, out var firstApplied);
+        bool secondAccepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, outcome.event_id, TestPlayerId, 250, out var secondApplied);
         var wallet = economy.GetWallet(TestPlayerId, false);
         var transactions = economy.GetRecentTransactions(TestPlayerId, 20).ToList();
 
@@ -71,8 +70,7 @@ public static class GameOutcomeRewardTests
 
     private static void Test_EmptyEventIdIsRejected(EconomyService economy)
     {
-        var outcome = new GameOutcomeRecord { event_id = "", coin_reward = 20 };
-        bool accepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, outcome, TestPlayerId, out var applied);
+        bool accepted = GameOutcomeRewardProcessor.TryApplyCoinReward(economy, "", TestPlayerId, 20, out var applied);
 
         Assert(!accepted && !applied, "Invalid event: empty event id cannot add coins");
     }

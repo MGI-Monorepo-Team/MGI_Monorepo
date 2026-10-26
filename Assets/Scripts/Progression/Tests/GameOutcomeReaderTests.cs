@@ -31,7 +31,7 @@ public static class GameOutcomeReaderTests
         {
             Test_CompleteWeekLoads(path);
             Test_IncompleteWeekIsRejected(path);
-            Test_NullFileUsesLocalFallback(path);
+            Test_NullFileReportsNoSimulatorOutput(path);
         }
         catch (Exception exception)
         {
@@ -82,7 +82,7 @@ public static class GameOutcomeReaderTests
         Assert(!string.IsNullOrEmpty(error), "Incomplete week: returns validation reason");
     }
 
-    private static void Test_NullFileUsesLocalFallback(string path)
+    private static void Test_NullFileReportsNoSimulatorOutput(string path)
     {
         File.WriteAllText(path, "null");
 
@@ -91,7 +91,7 @@ public static class GameOutcomeReaderTests
 
         Assert(!found, "Null file: signals no simulator output is available");
         AssertEqual(0, outcomes.Count, "Null file: returns no outcomes");
-        Assert(string.IsNullOrEmpty(error), "Null file: allows normal local fallback without an error");
+        Assert(string.IsNullOrEmpty(error), "Null file: reports no parse error");
     }
 
     private static GameOutcomeRecord Outcome(string eventId, string seasonId, int week, string home, string away, string winner)

@@ -68,6 +68,7 @@ public static class ProgressionUnitTests
         Test_CreateSeason_InitializesPlayerProgression(backend, progression);
         Test_AwardSeasonRewards_PlacementXp(backend, progression);
         Test_SimulateWeek_AwardsMatchXpAndAdvancesWeek(backend, progression);
+        Test_SimulateWeek_RequiresSimulatorOutput(backend, progression);
         Test_SimulateWeek_RejectsPastFinalWeek(backend);
 
         // Leave no residue in mgi_state for the test player.
@@ -402,9 +403,8 @@ public static class ProgressionUnitTests
                     AssertEqual(0, state.current_xp, "CreateSeason_InitializesPlayerProgression: starts at 0 XP");
                 }
 
-                // NOTE: CreateSeason hardcodes player_id = "local_player" (LocalSeasonBackend.cs:117),
-                // not the canonical device-id convention the DM testing doc calls for. Cleaning up
-                // whatever state this created so the test doesn't leave real "local_player" residue.
+                // CreateSeason resolves the active canonical player profile. Clean it up so this
+                // test does not leave persistent progression state behind.
                 progression.ClearPlayerProgression(playerTeam.player_id);
             }
         }
@@ -440,9 +440,37 @@ public static class ProgressionUnitTests
             }
         };
 
+        string fixturePath = Path.Combine(Path.GetTempPath(), $"mgi-simulator-week-{Guid.NewGuid()}.json");
+        File.WriteAllText(fixturePath, JsonConvert.SerializeObject(new GameOutcomeFile
+        {
+            season_id = season.season_id,
+            week = 1,
+            outcomes = new[]
+            {
+                new GameOutcomeRecord
+                {
+                    event_id = "progression-unit-test-week-1",
+                    season_id = season.season_id,
+                    week = 1,
+                    home_team_id = season.teams[0].team_id,
+                    away_team_id = season.teams[1].team_id,
+                    winner_team_id = season.teams[0].team_id
+                }
+            }
+        }));
+
         SeasonSaveData updated = null;
         string error = null;
-        backend.SimulateWeek(season, s => updated = s, e => error = e);
+        LocalSeasonBackend.OutcomeReaderFactoryForTests = () => new GameOutcomeReader(fixturePath);
+        try
+        {
+            backend.SimulateWeek(season, s => updated = s, e => error = e);
+        }
+        finally
+        {
+            LocalSeasonBackend.OutcomeReaderFactoryForTests = null;
+            if (File.Exists(fixturePath)) File.Delete(fixturePath);
+        }
 
         Assert(error == null, $"SimulateWeek_AwardsMatchXpAndAdvancesWeek: no error ({error})");
         Assert(updated != null, "SimulateWeek_AwardsMatchXpAndAdvancesWeek: season returned");
@@ -452,13 +480,11 @@ public static class ProgressionUnitTests
         }
 
         float xpGained = progression.GetState(TestPlayerId, createIfMissing: false)?.current_xp ?? 0f;
-        // Match played (5) + win (10) = 15, or match played (5) + loss (2) = 7 - outcome is
-        // randomized. Facilities' match multiplier applies on top and the fraction is kept.
+        // This fixture is a player win. Facilities' match multiplier applies on top and the fraction is kept.
         var facilities = new FacilitiesService();
         float winXp = 15f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_win");
-        float lossXp = 7f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_loss");
-        Assert(Mathf.Abs(xpGained - winXp) < 0.001f || Mathf.Abs(xpGained - lossXp) < 0.001f,
-            $"SimulateWeek_AwardsMatchXpAndAdvancesWeek: XP is {winXp} (win) or {lossXp} (loss), got {xpGained}");
+        Assert(Mathf.Abs(xpGained - winXp) < 0.001f,
+            $"SimulateWeek_AwardsMatchXpAndAdvancesWeek: XP is {winXp} for the imported win, got {xpGained}");
     }
 
     private static void Test_SimulateWeek_RejectsPastFinalWeek(LocalSeasonBackend backend)
@@ -477,6 +503,38 @@ public static class ProgressionUnitTests
 
         Assert(updated == null, "SimulateWeek_RejectsPastFinalWeek: no success callback fired");
         Assert(error != null, "SimulateWeek_RejectsPastFinalWeek: error callback fired");
+    }
+
+    private static void Test_SimulateWeek_RequiresSimulatorOutput(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        progression.ClearPlayerProgression(TestPlayerId);
+        var season = new SeasonSaveData
+        {
+            season_id = Guid.NewGuid().ToString(),
+            current_week = 0,
+            total_weeks = 10,
+            teams = new List<TeamSaveData>
+            {
+                new TeamSaveData { team_id = "player-team", player_id = TestPlayerId, is_player_team = true, stats = new TeamStatsSaveData() },
+                new TeamSaveData { team_id = "ai-team", player_id = "ai-player", is_player_team = false, stats = new TeamStatsSaveData() }
+            }
+        };
+        string missingPath = Path.Combine(Path.GetTempPath(), $"mgi-missing-simulator-week-{Guid.NewGuid()}.json");
+        SeasonSaveData updated = null;
+        string error = null;
+        LocalSeasonBackend.OutcomeReaderFactoryForTests = () => new GameOutcomeReader(missingPath);
+        try
+        {
+            backend.SimulateWeek(season, value => updated = value, message => error = message);
+        }
+        finally
+        {
+            LocalSeasonBackend.OutcomeReaderFactoryForTests = null;
+        }
+
+        Assert(updated == null, "SimulateWeek_RequiresSimulatorOutput: no success without imported outcomes");
+        Assert(!string.IsNullOrEmpty(error), "SimulateWeek_RequiresSimulatorOutput: actionable error when output is absent");
+        AssertEqual(0, season.current_week, "SimulateWeek_RequiresSimulatorOutput: does not advance the season");
     }
 
     // ---------------- Facilities integration ----------------

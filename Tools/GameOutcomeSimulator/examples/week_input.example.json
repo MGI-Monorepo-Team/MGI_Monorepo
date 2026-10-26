@@ -1,0 +1,27 @@
+{
+  "season_id": "demo-season",
+  "week": 1,
+  "seed": 20261025,
+  "teams": [
+    {
+      "team_id": "demo-team-a",
+      "card_uids": ["HE2RB0014", "HE2OL0015", "HE2R0018", "HE2DL0022", "HE2DB0025", "HE2S0020"],
+      "coach_ids": []
+    },
+    {
+      "team_id": "demo-team-b",
+      "card_uids": ["HE3RB0027", "HE3OL0028", "HE3R0031", "HE3DL0035", "HE3DB0038", "HE3S0033"],
+      "coach_ids": []
+    },
+    {
+      "team_id": "demo-team-c",
+      "card_uids": ["HE4RB0046", "HE4OL0047", "HE4R0050", "HE4DL0054", "HE4DB0057", "HE4S0052"],
+      "coach_ids": []
+    },
+    {
+      "team_id": "demo-team-d",
+      "card_uids": ["HE5RB0059", "HE5OL0060", "HE5R0063", "HE5DL0067", "HE5DB0070", "HE5S0065"],
+      "coach_ids": []
+    }
+  ]
+}
