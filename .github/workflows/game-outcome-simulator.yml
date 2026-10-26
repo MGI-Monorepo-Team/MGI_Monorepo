@@ -1,0 +1,31 @@
+# Runs the Game Outcome Simulator tests (Kanboard #2300).
+# Python only, separate from the Unity test gate. Triggers only when simulator files change.
+name: Game Outcome Simulator tests
+
+on:
+  pull_request:
+    paths:
+      - "Tools/GameOutcomeSimulator/**"
+      - ".github/workflows/game-outcome-simulator.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Tools/GameOutcomeSimulator/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Tools/GameOutcomeSimulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install pytest
+      - name: Unit and contract tests
+        run: python -m pytest -v
+      - name: Smoke run (engine output must pass validation)
+        run: python -m gos --runs 2 --seasons 3 --seed 42 --no-json --out out_ci

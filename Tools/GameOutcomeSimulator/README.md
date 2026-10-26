@@ -1,17 +1,28 @@
-# MGI Game Outcome Simulator
+# MGI Game Outcome Simulator (Kanboard #2300)
 
-This standalone tool reads the same JSON configuration files used by Unity.
-It intentionally lives outside `Assets/`, so Unity does not import Python files
-or simulator-only test fixtures.
+Standalone Python tool that simulates Deep Management seasons and outputs game
+results in the agreed contract (schema v0.2). It reads the same StreamingAssets
+JSON as Unity and lives outside `Assets/`, so Unity does not import it.
 
-## Run the loader checks
+| Module | What it does | Owner |
+| --- | --- | --- |
+| `gos/schema.py` | The data contract, 3 tables | Daniel |
+| `gos/validate.py` | Batch checks every output must pass | Daniel |
+| `gos/export.py` | CSV for LoopLab, JSON for DM systems | Daniel |
+| `gos/config_loader.py` | Reads StreamingAssets inputs | Adnan (A1), merged |
+| `gos/engine.py` | Strength, win chance, seasons, player journey | shared |
+| `gos/cli.py`, `gos/report.py` | Runner and visual test report | Daniel |
 
-From the repository root:
+## Run
+
+From this folder:
 
 ```bash
-python3 -m unittest discover -s Tools/GameOutcomeSimulator/tests -v
+pip install pytest matplotlib
+python3 -m pytest -v
+python3 -m gos --runs 100 --seasons 15 --no-json --out out_results
+python3 -m gos --runs 100 --seasons 15 --mode lump --no-json --out out_lump
+python3 -m gos.report out_results --compare out_lump
 ```
 
-The simulator is read-only at this stage. It loads card, team, coach, facility,
-and progression configuration; it does not yet write game outcomes or alter
-Unity save data.
+Same seed and config always give the same output.
