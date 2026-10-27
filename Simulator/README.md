@@ -65,6 +65,4 @@ happens today. Two things are still open:
   with one record per match (home, away, winner, scores, coin reward). The simulator
   exports schema v0.2, with two mirrored rows per match plus season and journey tables.
 - Team IDs must match Unity's. Unity uses the UUIDs from `Coaches/Database/team.json`,
-  while the simulator uses lowercase team names such as `hellion`.
-
-Adnan owns the Unity side of this (per-week integration).
+  while the simulator uses lowercase team names such as `hellion`. 
