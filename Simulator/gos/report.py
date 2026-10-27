@@ -5,19 +5,10 @@
   python3 -m gos.report out --show                   also open the window
 
 Reads the CSVs that `python3 -m gos` writes, re-runs every validation check,
-and saves report.png into the folder. Needs matplotlib (pip install matplotlib).
+and saves report.png into the folder. Needs matplotlib (pip install matplotlib)."""
 
-Panels
-  1. Validation        every contract check, pass or fail, plus batch size
-  2. Calibration       predicted win chance vs actual win rate (tests the match model)
-  3. Strength vs wins  each team-season, player team highlighted
-  4. Facilities        levels owned by the player over time (pacing)
-  5. XP and tiers      player XP over time against the tier thresholds
-  6. Coins             player wallet and coins earned over time
-  7. Margins           winning margin distribution
-  8. Placement         where the player team finishes
-"""
 import argparse
+import json
 import statistics as st
 import sys
 from collections import Counter, defaultdict
@@ -39,7 +30,18 @@ def load(folder):
     data["weeks"] = max(g["week"] for g in games)
     data["label"] = games[0].get("mode") or folder.name
     data["errors"] = validate_batch(games, data["season_summary"], data["player_journey"], weeks_per_season=data["weeks"])
+    info = folder / "run_info.json"  
+    data["info"] = json.loads(info.read_text()) if info.exists() else {}
+    data["info"].setdefault("seed", games[0].get("seed"))
+    if "model_version" in data["info"]:  # tells two runs of the same mode apart
+        data["label"] += f" v{data['info']['model_version']}"
     return data
+
+
+def run_line(d):
+    info = d["info"]
+    return (f"seed {info.get('seed', '?')}, model v{info.get('model_version', '?')}, "
+            f"schema v{info.get('schema_version', '?')}")
 
 
 def summary_lines(d):
@@ -48,6 +50,7 @@ def summary_lines(d):
     n_seasons = len({g["season_id"] for g in games})
     lines = [
         f"mode: {d['label']}",
+        run_line(d),
         f"{len(games):,} game rows, {len(seasons):,} season rows, {len(journey):,} journey rows",
         f"{runs} player runs, {n_seasons} seasons, {d['weeks']} weeks per season",
         "",
@@ -87,6 +90,8 @@ def build(datasets, out_path, show=False):
     colors = [BLUE, ORANGE]
     fig, axes = plt.subplots(4, 2, figsize=(15, 19))
     fig.suptitle("Game Outcome Simulator test report", fontsize=17, fontweight="bold", x=0.02, ha="left", y=0.995)
+    fig.text(0.98, 0.995, "   |   ".join(f"{d['label']}: {run_line(d)}" for d in datasets),
+             fontsize=10, color=INK, ha="right", va="top")
     ax = axes.flat
 
     # 1 validation

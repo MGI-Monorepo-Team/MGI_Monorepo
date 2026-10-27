@@ -1,14 +1,4 @@
-"""The data contract (schema v0.2).
-
-Every batch, simulator or live, must match these tables. Keep this file and
-the design spec in sync. Any field change bumps SCHEMA_VERSION.
-
-Three tables
-  game_outcomes   one row per team per match (2 rows per match)
-  season_summary  one row per team per season
-  player_journey  one row per week for the player team
-"""
-from dataclasses import dataclass
+from dataclasses import dataclass 
 
 from gos import SCHEMA_VERSION
 
@@ -18,11 +8,11 @@ SOURCES = ("simulator", "live")
 @dataclass(frozen=True)
 class Field:
     name: str
-    type: type                 # str, int, float or bool
-    required: bool = True      # must be present and non-null
-    sim_only: bool = False     # null allowed when source == "live"
-    allowed: tuple = ()        # enum values, empty means any value
-    min: float | None = None   # lowest allowed number
+    type: type                 
+    required: bool = True      
+    sim_only: bool = False     
+    allowed: tuple = ()        
+    min: float | None = None   
 
 
 F = Field

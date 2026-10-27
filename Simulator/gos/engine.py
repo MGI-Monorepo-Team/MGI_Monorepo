@@ -2,35 +2,20 @@
 
 Simulates Monster Gridiron Deep Management seasons from our game data and
 returns rows in the contract format (see gos/schema.py). Validation and
-export live in gos/validate.py and gos/export.py, not here.
-
-Coaches are read live from Coaches/coaches_schema_data.json through
-gos/config_loader.py. Teams, facilities and XP values below are still copied
-from MGI_Monorepo main and move to the loader next.
-
-Model v0.3 changes (Oct 26)
-  - Coach strength bonus = contract v1, round(avg of 4 role stats x 5) as whole
-    percentage points (CoachData.cs). Was the salary-linked coach.json bonus.
-  - Coach XP rating = avg of 4 role stats (CoachesService.CalculateStaticOverallRating).
-  - XP order as in ProgressionService.ApplyXpBonuses. Facility multiplier first,
-    then coach bonus, each max(1, xp), no floor.
-  - Facilities no longer affect match strength (Prof. Easley, Oct 22). They still
-    affect XP and are still bought with coins.
-  - Starter coaches and fixed starter roster from Jashwant's proposal (Oct 19).
-Rehab center effects are simplified to costs only.
+export live in gos/validate.py and gos/export.py.
 """
+import json
 import math
 import random
 from collections import Counter
 
 from gos import SCHEMA_VERSION
-from gos.config_loader import load_repository_config
+from gos.config_loader import REPO_ROOT, load_repository_config
 
 MODEL_VERSION = "0.3"
+MODELS = ("0.2", "0.3")
 
-# ---------------------------------------------------------------- our data
-# cards_catalog.json: every team has the same pool. Per tier 1-5 there are
-# RB 1, OL 3, R 2, S 2, DL 3, DB 2 (13 cards), plus 1 QB at tier 1. 66 total.
+
 TEAMS = [("Hellion", "Fire"), ("Droid", "Radiation"), ("Elemental", "Fire"), ("Creature", "Poison"),
          ("Zombie", "Radiation"), ("Insectoid", "Acid"), ("Ogres", "Ice"), ("Ghost", "Corruption"),
          ("Alien", "Electrical"), ("SewerBeast", "Acid"), ("Vampire", "Corruption"), ("Demonoid", "Fire"),
@@ -59,6 +44,21 @@ def coach_from_record(rec):
 
 def coach_pool():
     return [coach_from_record(r) for r in load_repository_config().coaches]
+
+
+LEGACY_COACHES_PATH = REPO_ROOT / "Assets" / "StreamingAssets" / "Coaches" / "Database" / "coach.json"
+LEGACY_START_COACHES = {"O": "Joe Bach", "D": "Joe Collier", "ST": "John Whelchel"}
+
+
+def legacy_coach_from_record(rec):
+    """One coach.json coach as the v0.2 model used it: salary-linked bonus, overall_rating."""
+    ctype = "ST" if rec["coach_type"] in ("ST", "S") else rec["coach_type"]
+    return {"id": rec["coach_id"], "name": rec["coach_name"], "type": ctype,
+            "rating": rec["overall_rating"], "bonus": rec["bonus"]}
+
+
+def legacy_coach_pool(path=LEGACY_COACHES_PATH):
+    return [legacy_coach_from_record(r) for r in json.loads(path.read_text(encoding="utf-8"))]
 
 
 def coach_by_name(name, pool=None):
@@ -95,16 +95,16 @@ CONFIG = {
     "home_advantage": 2.0,
     "loser_score_mean": 20.0, "loser_score_sd": 6.0,
     "margin_base": 3.0, "margin_per_strength": 0.25, "margin_sd": 8.0,
-    # Facilities do not affect match strength (Prof. Easley, Oct 22)
+    # Facilities do not affect match strength 
     "facility_strength_effects": [],
-    # PLACEHOLDER coin rewards (Economy + LoopLab own the real values)
+    # PLACEHOLDER coin rewards 
     "coins_per_game": 5000, "coins_per_win": 10000,
     "coins_placement": {1: 60000, 2: 40000, 3: 20000},
     "player_team": "Hellion",
-    # Starter setup from Jashwant (Oct 19), pending CCAS confirmation of the starter cards
-    "player_start_roster_tier": 2,     # tier-1 QB (the only QB tier) and tier 2 everywhere else
+    # Starter setup from Jashwant 
+    "player_start_roster_tier": 2,    
     "player_start_coaches": {"O": "Aldo Donelli", "D": "Ed Khayat", "ST": "Aaron Kromer"},
-    "ai_tiers": [1, 2, 3, 4, 5],       # AI teams draw from their full pool
+    "ai_tiers": [1, 2, 3, 4, 5],       
 }
 
 
@@ -195,18 +195,22 @@ def buy_upgrades(state, team):
         bought.append(f"{f}:{team['facilities'][f]}")
 
 
-def run(runs, seasons, seed, mode="results"):
-    """mode results = coins from game results. mode lump = 1,200,000 at start (today)."""
+def run(runs, seasons, seed, mode="results", model=MODEL_VERSION):
+    """mode results = coins from game results. mode lump = 1,200,000 at start (today).
+    model 0.3 = current coach model, 0.2 = legacy coach.json bonus (see module docstring)."""
+    if model not in MODELS:
+        raise ValueError(f"unknown model {model!r}, expected one of {MODELS}")
     rng = random.Random(seed)
     games, standings, journey = [], [], []
     c = CONFIG
-    pool = coach_pool()
+    pool = coach_pool() if model == "0.3" else legacy_coach_pool()
+    start_coaches = c["player_start_coaches"] if model == "0.3" else LEGACY_START_COACHES
     for run_i in range(1, runs + 1):
         teams = [build_team(rng, n, e, c["ai_tiers"], pool) for n, e in TEAMS]
         me = next(t for t in teams if t["team_name"] == c["player_team"])
         me["roster"] = {s: c["player_start_roster_tier"] for s in OFFENCE_SLOTS + DEFENCE_SLOTS}
         me["roster"]["qb"] = 1
-        me["coaches"] = {t: coach_by_name(n, pool) for t, n in c["player_start_coaches"].items()}
+        me["coaches"] = {t: coach_by_name(n, pool) for t, n in start_coaches.items()}
         state = {"coins": 1200000 if mode == "lump" else 0, "xp": 0.0}
         if mode == "lump": buy_upgrades(state, me)
         for s in range(1, seasons + 1):

@@ -5,12 +5,12 @@ name: Game Outcome Simulator tests
 on:
   pull_request:
     paths:
-      - "Tools/GameOutcomeSimulator/**"
+      - "Simulator/**"
       - ".github/workflows/game-outcome-simulator.yml"
   push:
     branches: [main]
     paths:
-      - "Tools/GameOutcomeSimulator/**"
+      - "Simulator/**"
 
 jobs:
   test:
@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: Tools/GameOutcomeSimulator
+        working-directory: Simulator
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

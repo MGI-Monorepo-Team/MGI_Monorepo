@@ -1,13 +1,6 @@
-"""Read the management-game configuration used as simulator input.
-
-Written by Adnan (task A1, branch feature/game-outcome-simulator-integration),
-merged into the gos package by Daniel. Change from the original: coaches come
-from the 499-coach catalog Coaches/coaches_schema_data.json, which is what
-CoachesService loads first, instead of the legacy 31-coach coach.json.
-
+"""Read the management-game configuration used as simulator input. 
 The simulator reads the repository's StreamingAssets files instead of keeping
-copied values, so simulation inputs stay aligned with Unity.
-"""
+copied values, so simulation inputs stay aligned with Unity."""
 from __future__ import annotations
 
 import json
@@ -16,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # gos -> GameOutcomeSimulator -> Tools -> repo
+REPO_ROOT = Path(__file__).resolve().parents[2]  # gos -> Simulator -> repo
 
 
 class ConfigurationLoadError(ValueError):

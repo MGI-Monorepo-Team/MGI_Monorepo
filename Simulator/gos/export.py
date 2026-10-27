@@ -1,4 +1,4 @@
-"""Export a validated batch for LoopLab (CSV) and DM systems (JSON), and read CSV back."""
+"""Exports a validated batch for LoopLab (CSV) and DM systems (JSON), and read CSV back."""
 import csv
 import json
 from pathlib import Path
@@ -15,7 +15,7 @@ class ValidationError(Exception):
 
 
 def write_csv(rows, path, table):
-    """Write rows in contract column order. Missing optional fields become empty cells."""
+    """Write rows in contract column order."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:

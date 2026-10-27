@@ -115,6 +115,33 @@ def test_player_starts_with_the_agreed_setup():
     assert row["coach_bonus_applied_percent"] == 15.0
 
 
+def test_legacy_coach_bonus_is_salary_linked():
+    """v0.2 model: coach.json bonus = salary / 4, 31 coaches."""
+    pool = engine.legacy_coach_pool()
+    assert len(pool) == 31
+    assert {c["type"] for c in pool} == set(engine.COACH_TYPES)
+    for rec in engine.json.loads(engine.LEGACY_COACHES_PATH.read_text()):
+        assert rec["bonus"] == pytest.approx(rec["salary"] / 4)
+
+
+def test_v02_model_passes_validation_with_legacy_starters():
+    games, seasons, journey = engine.run(runs=2, seasons=2, seed=7, model="0.2")
+    assert validate_batch(games, seasons, journey, weeks_per_season=WEEKS) == []
+    row = next(g for g in games if g["is_player_team"])
+    assert (row["offence_coach"], row["defence_coach"], row["special_teams_coach"]) == (
+        "Joe Bach", "Joe Collier", "John Whelchel")
+    assert row["coach_bonus_applied_percent"] == 1.25   # 0.5 + 0.5 + 0.25, as in the v0.2 fixtures
+
+
+def test_default_model_is_v03():
+    assert engine.run(1, 1, seed=5) == engine.run(1, 1, seed=5, model="0.3")
+
+
+def test_unknown_model_is_rejected():
+    with pytest.raises(ValueError, match="unknown model"):
+        engine.run(1, 1, seed=5, model="0.1")
+
+
 def test_cli_writes_files(tmp_path, capsys):
     assert main(["--runs", "1", "--seasons", "1", "--out", str(tmp_path)]) == 0
     assert (tmp_path / "game_outcomes.csv").exists()

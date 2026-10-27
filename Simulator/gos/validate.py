@@ -1,16 +1,10 @@
-"""Batch validation. Every batch, simulator or live, must pass before export.
-
-check_row in schema.py checks one row at a time. This file checks how rows
-fit together: matches pair up, running totals add up, standings agree with
-the games, and the player journey only moves forward.
-"""
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict 
 
 from gos.schema import check_row
 
 TIERS = (("rookie", 0), ("pro", 50), ("all_star", 100), ("legend", 150))  # progression.json
 MAX_FACILITY_LEVEL = 5
-MAX_ROW_ERRORS = 20  # stop listing row problems after this many, the batch is clearly broken
+MAX_ROW_ERRORS = 20  
 
 
 def tier_for(xp: float) -> str:
@@ -39,7 +33,7 @@ def check_games(games, weeks_per_season=10, points_per_win=2):
     if not games:
         return ["game_outcomes is empty"]
     if not _rows(games, "game_outcomes", errors):
-        return errors  # pairing checks below assume well-typed rows
+        return errors  
 
     # 1. league wins equal league losses
     results = Counter(g["result"] for g in games)
@@ -105,7 +99,7 @@ def check_games(games, weeks_per_season=10, points_per_win=2):
                 break
 
     # 6. one player team per season, playing every week
-    players = {g["season_id"]: set() for g in games}   # one pass, not one scan per season
+    players = {g["season_id"]: set() for g in games}   
     for g in games:
         if g["is_player_team"]:
             players[g["season_id"]].add(g["team_id"])
@@ -151,7 +145,7 @@ def check_seasons(seasons, games=(), points_per_win=2):
             errors.append(f"{season}: placements {places} are not 1..{len(rows)}")
             continue
         ordered = sorted(rows, key=lambda r: r["placement"])
-        for hi, lo in zip(ordered, ordered[1:]):  # higher place never has fewer points
+        for hi, lo in zip(ordered, ordered[1:]):  
             if (hi["standing_points"], hi["point_diff"], hi["points_for"]) < (lo["standing_points"], lo["point_diff"], lo["points_for"]):
                 errors.append(f"{season}: {hi['team_id']} placed above {lo['team_id']} with a worse record")
                 break
