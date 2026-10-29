@@ -70,6 +70,14 @@ public static class ProgressionUnitTests
         Test_SimulateWeek_AwardsMatchXpAndAdvancesWeek(backend, progression);
         Test_SimulateWeek_RejectsPastFinalWeek(backend);
 
+        Test_XpRewardRules_AreReadFromConfig(progression);
+        Test_SimulateWeek_GrantsOneTrainingEntryPerWeek(backend, progression);
+        Test_AwardTrainingXp_IsIdempotentPerWeek(backend, progression);
+        Test_FinalWeek_AwardsSeasonRewardOnce(backend, progression);
+        Test_MidSeasonWeek_DoesNotAwardSeasonReward(backend, progression);
+        Test_LastMatchProperties_IgnoreTrainingEntry(progression);
+        Test_XpScreen_GroupsEntriesByWeek();
+
         // Leave no residue in mgi_state for the test player.
         progression.ClearPlayerProgression(TestPlayerId);
 
@@ -453,12 +461,209 @@ public static class ProgressionUnitTests
 
         float xpGained = progression.GetState(TestPlayerId, createIfMissing: false)?.current_xp ?? 0f;
         // Match played (5) + win (10) = 15, or match played (5) + loss (2) = 7 - outcome is
-        // randomized. Facilities' match multiplier applies on top and the fraction is kept.
+        // randomized. Facilities' match multiplier applies on top, and so does the weekly
+        // training grant (2 XP x the Weight Room multiplier); the fraction is kept.
         var facilities = new FacilitiesService();
-        float winXp = 15f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_win");
-        float lossXp = 7f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_loss");
+        float trainingXp = 2f * facilities.GetProgressionXpMultiplier(TestPlayerId, "training");
+        float winXp = 15f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_win") + trainingXp;
+        float lossXp = 7f * facilities.GetProgressionXpMultiplier(TestPlayerId, "match_loss") + trainingXp;
         Assert(Mathf.Abs(xpGained - winXp) < 0.001f || Mathf.Abs(xpGained - lossXp) < 0.001f,
-            $"SimulateWeek_AwardsMatchXpAndAdvancesWeek: XP is {winXp} (win) or {lossXp} (loss), got {xpGained}");
+            $"SimulateWeek_AwardsMatchXpAndAdvancesWeek: XP is {winXp} (win + training) or {lossXp} (loss + training), got {xpGained}");
+    }
+
+    // ---------------- XP decisions: config rules, weekly training, season-end reward ----------------
+
+    private static void Test_XpRewardRules_AreReadFromConfig(ProgressionService progression)
+    {
+        var rules = progression.GetXpRewardRules();
+        Assert(rules != null, "XpRewardRules: loaded from progression.json");
+        if (rules == null) return;
+
+        AssertEqual(5, rules.match_played, "XpRewardRules: match played");
+        AssertEqual(10, rules.win, "XpRewardRules: win bonus");
+        AssertEqual(2, rules.loss, "XpRewardRules: loss bonus");
+        AssertEqual(2, rules.training_per_week, "XpRewardRules: weekly training XP");
+        AssertEqual(15, rules.MatchXp(true), "XpRewardRules: a win is worth 15 base XP");
+        AssertEqual(7, rules.MatchXp(false), "XpRewardRules: a loss is worth 7 base XP");
+        AssertEqual(50, rules.SeasonRewardForPlacement(1), "XpRewardRules: 1st place");
+        AssertEqual(30, rules.SeasonRewardForPlacement(2), "XpRewardRules: 2nd place");
+        AssertEqual(15, rules.SeasonRewardForPlacement(3), "XpRewardRules: 3rd place");
+        AssertEqual(0, rules.SeasonRewardForPlacement(4), "XpRewardRules: nothing below 3rd");
+    }
+
+    private static SeasonSaveData BuildTwoTeamSeason(int currentWeek, int totalWeeks)
+    {
+        return new SeasonSaveData
+        {
+            season_id = Guid.NewGuid().ToString(),
+            current_week = currentWeek,
+            total_weeks = totalWeeks,
+            teams = new List<TeamSaveData>
+            {
+                new TeamSaveData { team_id = Guid.NewGuid().ToString(), player_id = TestPlayerId, team_name = "PlayerTeam", is_player_team = true, stats = new TeamStatsSaveData() },
+                new TeamSaveData { team_id = Guid.NewGuid().ToString(), player_id = Guid.NewGuid().ToString(), team_name = "AiTeam", is_player_team = false, stats = new TeamStatsSaveData() }
+            }
+        };
+    }
+
+    private static void Test_SimulateWeek_GrantsOneTrainingEntryPerWeek(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        progression.ClearPlayerProgression(TestPlayerId);
+        var season = BuildTwoTeamSeason(currentWeek: 0, totalWeeks: 10);
+
+        string error = null;
+        backend.SimulateWeek(season, s => { }, e => error = e);
+        backend.SimulateWeek(season, s => { }, e => error = e);
+        Assert(error == null, $"WeeklyTraining: two weeks simulate without error ({error})");
+
+        var history = progression.GetState(TestPlayerId, createIfMissing: false).xp_history;
+        var training = history.Where(e => e.source == "training").ToList();
+        AssertEqual(2, training.Count, "WeeklyTraining: exactly one training grant per simulated week");
+        AssertEqual(2, history.Count(e => e.source.StartsWith("match_")), "WeeklyTraining: one match grant per week alongside it");
+
+        float expected = 2f * new FacilitiesService().GetProgressionXpMultiplier(TestPlayerId, "training");
+        Assert(training.All(e => Mathf.Abs(e.xp_gained - expected) < XpTolerance),
+            $"WeeklyTraining: each grant is 2 XP x the Weight Room multiplier ({expected})");
+        Assert(training.All(e => e.id.EndsWith(":training")), "WeeklyTraining: grant ids are per week and per source");
+        Assert(history.Select(e => e.source).SequenceEqual(new[] { history[0].source, "training", history[2].source, "training" })
+               && history[0].source.StartsWith("match_") && history[2].source.StartsWith("match_"),
+            "WeeklyTraining: each week's training grant follows its match");
+    }
+
+    private static void Test_AwardTrainingXp_IsIdempotentPerWeek(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        progression.ClearPlayerProgression(TestPlayerId);
+        var award = typeof(LocalSeasonBackend).GetMethod("AwardTrainingXp", BindingFlags.NonPublic | BindingFlags.Instance);
+        string seasonId = Guid.NewGuid().ToString();
+
+        award.Invoke(backend, new object[] { TestPlayerId, seasonId, 3 });
+        award.Invoke(backend, new object[] { TestPlayerId, seasonId, 3 });
+        AssertEqual(1, progression.GetState(TestPlayerId).xp_history.Count(e => e.source == "training"),
+            "WeeklyTraining: the same week's grant cannot be applied twice");
+    }
+
+    // Deterministic standings: wins drive points (SimulateWeek recomputes points = wins x 2), so
+    // seed wins as well, with ranks 100 points apart so one random week cannot reorder them.
+    private static SeasonSaveData BuildSeasonOneWeekFromEnd(int playerPlacement)
+    {
+        var season = BuildSeasonWithPlayerAtPlacement(playerPlacement);
+        season.current_week = season.total_weeks - 1;
+        foreach (var team in season.teams) team.stats.wins = team.stats.points / 2;
+        return season;
+    }
+
+    private static void Test_FinalWeek_AwardsSeasonRewardOnce(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        var facilities = new FacilitiesService();
+        float seasonMultiplier = facilities.GetProgressionXpMultiplier(TestPlayerId, "season_reward");
+
+        foreach (var (placement, baseXp) in new[] { (1, 50), (2, 30), (3, 15) })
+        {
+            progression.ClearPlayerProgression(TestPlayerId);
+            var season = BuildSeasonOneWeekFromEnd(placement);
+            season.teams.First(t => t.is_player_team).player_id = TestPlayerId;
+
+            backend.SimulateWeek(season, s => { }, e => { });
+            AssertEqual(season.total_weeks, season.current_week, $"SeasonEnd {placement}: the final week was simulated");
+
+            var rewards = progression.GetState(TestPlayerId).xp_history.Where(e => e.source == "season_reward").ToList();
+            AssertEqual(1, rewards.Count, $"SeasonEnd {placement}: the season reward is awarded when the final week is simulated");
+            if (rewards.Count == 1)
+            {
+                AssertEqual(baseXp * seasonMultiplier, rewards[0].xp_gained, $"SeasonEnd {placement}: reward is {baseXp} base XP x the season multiplier", XpTolerance);
+                AssertEqual($"{season.season_id}:season_reward", rewards[0].id, $"SeasonEnd {placement}: the grant id is derived from the season");
+            }
+
+            backend.AwardSeasonRewards(season, s => { }, e => { });
+            AssertEqual(1, progression.GetState(TestPlayerId).xp_history.Count(e => e.source == "season_reward"),
+                $"SeasonEnd {placement}: calling the reward again cannot pay out twice");
+        }
+
+        progression.ClearPlayerProgression(TestPlayerId);
+        var lowSeason = BuildSeasonOneWeekFromEnd(4);
+        lowSeason.teams.First(t => t.is_player_team).player_id = TestPlayerId;
+        backend.SimulateWeek(lowSeason, s => { }, e => { });
+        AssertEqual(0, progression.GetState(TestPlayerId).xp_history.Count(e => e.source == "season_reward"),
+            "SeasonEnd 4th: no reward below 3rd place");
+    }
+
+    private static void Test_MidSeasonWeek_DoesNotAwardSeasonReward(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        progression.ClearPlayerProgression(TestPlayerId);
+        var season = BuildSeasonWithPlayerAtPlacement(1);
+        season.current_week = 4;
+        foreach (var team in season.teams) team.stats.wins = team.stats.points / 2;
+
+        backend.SimulateWeek(season, s => { }, e => { });
+        AssertEqual(0, progression.GetState(TestPlayerId).xp_history.Count(e => e.source == "season_reward"),
+            "SeasonEnd: no season reward before the final week");
+    }
+
+    private static void Test_LastMatchProperties_IgnoreTrainingEntry(ProgressionService progression)
+    {
+        var go = new GameObject("SeasonManager_TestHarness");
+        try
+        {
+            var manager = go.AddComponent<SeasonManager>();
+            ForceAwake(manager);
+            typeof(SeasonManager).GetField("progressionService", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(manager, progression);
+            typeof(SeasonManager).GetField("seasonData", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(manager, BuildTwoTeamSeason(1, 10));
+
+            // A win followed by its training grant: the result screen must still read "win" and
+            // show the week's total, not the 2-XP training entry that is now the last entry.
+            progression.ClearPlayerProgression(TestPlayerId);
+            progression.AddXp(TestPlayerId, 15, "match_win", Guid.NewGuid().ToString());
+            progression.AddXp(TestPlayerId, 2, "training", Guid.NewGuid().ToString());
+            var history = progression.GetState(TestPlayerId).xp_history;
+            Assert(manager.WasLastMatchWin, "LastMatch: a win followed by training still reads as a win");
+            AssertEqual("match_win", manager.LastMatchXpSource, "LastMatch: the source is the match, not training");
+            AssertEqual(XpFormat.ToDisplay(history[0].xp_gained + history[1].xp_gained), manager.LastXpGained, "LastMatch: XP gained is the week's match + training");
+
+            progression.ClearPlayerProgression(TestPlayerId);
+            progression.AddXp(TestPlayerId, 7, "match_loss", Guid.NewGuid().ToString());
+            progression.AddXp(TestPlayerId, 2, "training", Guid.NewGuid().ToString());
+            Assert(!manager.WasLastMatchWin, "LastMatch: a loss followed by training reads as a loss");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+
+        var entries = new List<XpHistoryEntry>
+        {
+            new XpHistoryEntry("p", 9f, "duplicate_card_rare"),
+            new XpHistoryEntry("p", 15f, "match_win"),
+            new XpHistoryEntry("p", 2f, "training"),
+            new XpHistoryEntry("p", 9f, "duplicate_card_rare")
+        };
+        AssertEqual(1, SeasonManager.LastMatchIndex(entries), "LastMatch: finds the latest match entry among other sources");
+        AssertEqual(17f, SeasonManager.LastWeekXp(entries), "LastMatch: the week total is the match + its training, excluding later duplicates", XpTolerance);
+        AssertEqual(-1, SeasonManager.LastMatchIndex(new List<XpHistoryEntry>()), "LastMatch: no entries means no match");
+        AssertEqual(0f, SeasonManager.LastWeekXp(new List<XpHistoryEntry>()), "LastMatch: no match means no week XP", XpTolerance);
+    }
+
+    private static void Test_XpScreen_GroupsEntriesByWeek()
+    {
+        XpHistoryEntry E(float xp, string source) => new XpHistoryEntry("p", xp, source);
+
+        // Two weeks of match + training, a CCAS duplicate in week 2, then a third match.
+        var entries = new List<XpHistoryEntry>
+        {
+            E(15, "match_win"), E(2, "training"),
+            E(7, "match_loss"), E(2, "training"), E(25, "duplicate_card_rare"),
+            E(15, "match_win")
+        };
+        Assert(XPUI.WeekNumbers(entries).SequenceEqual(new[] { 1, 1, 2, 2, 2, 3 }),
+            "XpScreen: weeks come from matches, not from row position (6 entries span 3 weeks, not 6)");
+
+        var totals = XPUI.TotalsByWeek(entries);
+        AssertEqual(3, totals.Count, "XpScreen: the chart has one bar per week");
+        AssertEqual(17f, totals[0].Value, "XpScreen: week 1 total is match + training", XpTolerance);
+        AssertEqual(34f, totals[1].Value, "XpScreen: week 2 total includes its training and the duplicate opened that week", XpTolerance);
+        AssertEqual(15f, totals[2].Value, "XpScreen: week 3 total", XpTolerance);
+
+        Assert(XPUI.WeekNumbers(new List<XpHistoryEntry> { E(25, "duplicate_card_rare"), E(15, "match_win") }).SequenceEqual(new[] { 1, 1 }),
+            "XpScreen: an entry before the first match counts as week 1");
     }
 
     private static void Test_SimulateWeek_RejectsPastFinalWeek(LocalSeasonBackend backend)

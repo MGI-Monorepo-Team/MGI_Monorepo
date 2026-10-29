@@ -4,6 +4,7 @@
     "match_played": 5,
     "win": 10,
     "loss": 2,
+    "training_per_week": 2,
     "season_rewards": {
       "1st": 50,
       "2nd": 30,
@@ -35,13 +36,6 @@
       "display_name": "Legend",
       "unlock_features": ["legendary_training", "mentorship_program"]
     }
-  },
-  "xp_calculation": {
-    "base_match_xp": 5,
-    "win_bonus": 10,
-    "loss_bonus": 2,
-    "consecutive_win_bonus": 2,
-    "season_placement_bonus": true
   },
   "milestone_tracking": {
     "prototype_phase": "completed",

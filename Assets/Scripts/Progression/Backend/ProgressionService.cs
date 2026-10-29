@@ -237,6 +237,15 @@ public class ProgressionService : MonoBehaviour
         return _progressionConfig?.GetAllTiers() ?? new Dictionary<string, TierData>();
     }
 
+    /// <summary>
+    /// Base XP amounts from progression.json (match, weekly training, season placement).
+    /// Null if the config is missing or incomplete - callers must not award XP then.
+    /// </summary>
+    public XpRewardRules GetXpRewardRules()
+    {
+        return _progressionConfig?.RewardRules;
+    }
+
    
     private string CalculateTierForXp(float totalXp)
     {
@@ -474,8 +483,14 @@ public class ProgressionService : MonoBehaviour
     {
         private Dictionary<string, TierData> _tiers = new Dictionary<string, TierData>();
 
+        // Null when xp_reward_rules is missing or incomplete; callers must treat that as
+        // "no XP can be awarded" rather than guessing amounts.
+        public XpRewardRules RewardRules { get; private set; }
+
         public ProgressionConfig(JSONNode configJson)
         {
+            RewardRules = ParseRewardRules(configJson["xp_reward_rules"]);
+
             // Parse tier_progression section
             var tiersNode = configJson["tier_progression"];
             foreach (KeyValuePair<string, JSONNode> kvp in tiersNode)
@@ -497,6 +512,43 @@ public class ProgressionService : MonoBehaviour
 
                 _tiers[tierName] = tierData;
             }
+        }
+
+        private static XpRewardRules ParseRewardRules(JSONNode node)
+        {
+            if (node == null || node.IsNull || !node.IsObject)
+            {
+                Debug.LogError("[ProgressionService] progression.json has no xp_reward_rules; no match, training or season XP can be awarded.");
+                return null;
+            }
+
+            var seasonRewards = node["season_rewards"];
+            var rules = new XpRewardRules();
+
+            // Evaluate every key (no short-circuit) so one run reports all missing values.
+            bool ok = true;
+            ok &= TryRead(node, "match_played", "xp_reward_rules.match_played", out rules.match_played);
+            ok &= TryRead(node, "win", "xp_reward_rules.win", out rules.win);
+            ok &= TryRead(node, "loss", "xp_reward_rules.loss", out rules.loss);
+            ok &= TryRead(node, "training_per_week", "xp_reward_rules.training_per_week", out rules.training_per_week);
+            ok &= TryRead(seasonRewards, "1st", "xp_reward_rules.season_rewards.1st", out rules.season_1st);
+            ok &= TryRead(seasonRewards, "2nd", "xp_reward_rules.season_rewards.2nd", out rules.season_2nd);
+            ok &= TryRead(seasonRewards, "3rd", "xp_reward_rules.season_rewards.3rd", out rules.season_3rd);
+
+            return ok ? rules : null;
+        }
+
+        private static bool TryRead(JSONNode parent, string key, string path, out int value)
+        {
+            if (parent == null || !parent.HasKey(key) || !parent[key].IsNumber)
+            {
+                Debug.LogError($"[ProgressionService] progression.json is missing a numeric value for {path}.");
+                value = 0;
+                return false;
+            }
+
+            value = parent[key].AsInt;
+            return true;
         }
 
         public string GetTierForXp(float totalXp)
