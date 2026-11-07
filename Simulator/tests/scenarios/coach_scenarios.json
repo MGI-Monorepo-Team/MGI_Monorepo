@@ -1,0 +1,1512 @@
+{
+  "format": "coach_scenarios",
+  "schema_version": 2,
+  "model_version": "0.3",
+  "purpose": "Shared test cases for the Python simulator and the C# port. Same file, same expected numbers.",
+  "constants": {
+    "tier_scale": 20,
+    "weight_offence": 0.45,
+    "weight_defence": 0.4,
+    "weight_special_teams": 0.15,
+    "coach_bonus_multiplier": 5,
+    "k": 0.06,
+    "home_advantage": 2.0,
+    "xp_played": 5,
+    "xp_win": 10,
+    "xp_loss": 2,
+    "coach_xp_base": 0.03,
+    "coach_xp_rating_multiplier": 0.0004,
+    "coach_xp_synergy": 0.02,
+    "team_rating_baseline": 12,
+    "team_rating_normalization": 1
+  },
+  "tolerances": {
+    "strength": 0.01,
+    "probability": 0.0005,
+    "xp": 0.001
+  },
+  "notes": [
+    "Coach bonus = round(average of the 4 role stats x 5), whole percentage points; empty slot = 0.",
+    "Win XP is one grant per match: 5 played + 10 win = 15 base. Loss base is 5 + 2 = 7. Coach XP bonus applies on wins only.",
+    "Facility multiplier is applied first, then the coach bonus, each with a minimum of 1 and no floor.",
+    "Facilities do not change match strength (Prof. Easley, Oct 22).",
+    "Special Teams strength unit uses all 14 roster slots (open question 6).",
+    "Opponent strengths: 58.0 (spec average) and 63.9 (AI average in the 15-season test report).",
+    "Expected values are calculated from the formulas, not copied from the engine.",
+    "Every scenario has scenario_id and schema_version. input and expected are separate. All collections are explicit lists with named fields; no reader should rely on JSON key order.",
+    "coach_state lists one row per role (O, D, ST). An empty slot has coach_name null, overall_rating 0, bonus_pct 0, win_xp_bonus 0.",
+    "team_rating = team_rating_baseline + sum of the three bonus_pct, divided by team_rating_normalization (CoachesService.GetTeamRating). The Python engine has no team rating, so the Python test only checks it against the bonuses.",
+    "win_xp_bonus per coach is 0.03 + 0.0004 x overall_rating for Offense and Defense; Special Teams has none. coach_win_bonus in xp is the sum plus 0.02 when both are hired."
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "S1",
+      "schema_version": 2,
+      "name": "New player baseline",
+      "description": "Starter roster (QB tier 1, all other slots tier 2) and starter coaches (bonus 5 each), no facilities.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Aldo Donelli",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 1
+              },
+              {
+                "stat": "rush",
+                "value": 1
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 1
+              },
+              {
+                "stat": "play_variation",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": "Ed Khayat",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 1
+              },
+              {
+                "stat": "pressure_control",
+                "value": 1
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 1
+              },
+              {
+                "stat": "turnover",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": "Aaron Kromer",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 1
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 1
+              },
+              {
+                "stat": "return_speed",
+                "value": 1
+              },
+              {
+                "stat": "return_coverage",
+                "value": 1
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": "Aldo Donelli",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0304
+          },
+          {
+            "role": "D",
+            "coach_name": "Ed Khayat",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0304
+          },
+          {
+            "role": "ST",
+            "coach_name": "Aaron Kromer",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 27,
+        "strength": 40.425,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.282,
+            "away": 0.236
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.2161,
+            "away": 0.1782
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0.0808,
+          "win": 16.212,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S2",
+      "schema_version": 2,
+      "name": "No coaches hired",
+      "description": "Starter roster, all three coach slots empty. Empty slot counts as 0 bonus, no XP bonus.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 12,
+        "strength": 38.5,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.2592,
+            "away": 0.2159
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.1972,
+            "away": 0.1619
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0,
+          "win": 15,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S3",
+      "schema_version": 2,
+      "name": "Max coaches",
+      "description": "Starter roster with the highest-bonus coach per role in the catalog (30 / 30 / 26).",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Don Shula",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 6
+              },
+              {
+                "stat": "rush",
+                "value": 6
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 6
+              },
+              {
+                "stat": "play_variation",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": "Bill Belichick",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 6
+              },
+              {
+                "stat": "pressure_control",
+                "value": 6
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 6
+              },
+              {
+                "stat": "turnover",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": "John Harbaugh",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 5
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 5
+              },
+              {
+                "stat": "return_speed",
+                "value": 5
+              },
+              {
+                "stat": "return_coverage",
+                "value": 6
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": "Don Shula",
+            "overall_rating": 6.0,
+            "bonus_pct": 30,
+            "win_xp_bonus": 0.0324
+          },
+          {
+            "role": "D",
+            "coach_name": "Bill Belichick",
+            "overall_rating": 6.0,
+            "bonus_pct": 30,
+            "win_xp_bonus": 0.0324
+          },
+          {
+            "role": "ST",
+            "coach_name": "John Harbaugh",
+            "overall_rating": 5.25,
+            "bonus_pct": 26,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 98,
+        "strength": 49.8186,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.4083,
+            "away": 0.3519
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.3263,
+            "away": 0.2759
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0.0848,
+          "win": 16.272,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S4a",
+      "schema_version": 2,
+      "name": "Coach isolation: Offense only",
+      "description": "Offense coach with bonus 30, Defense and Special Teams empty. Strength rises by 0.45 x O x 0.30 only.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Test Offense",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 6
+              },
+              {
+                "stat": "rush",
+                "value": 6
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 6
+              },
+              {
+                "stat": "play_variation",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": "Test Offense",
+            "overall_rating": 6.0,
+            "bonus_pct": 30,
+            "win_xp_bonus": 0.0324
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 42,
+        "strength": 43.5143,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.321,
+            "away": 0.2711
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.2492,
+            "away": 0.207
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0.0324,
+          "win": 15.486,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S4b",
+      "schema_version": 2,
+      "name": "Coach isolation: Defense only",
+      "description": "Defense coach with bonus 30, others empty. Strength rises by 0.40 x D x 0.30 only.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": "Test Defense",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 6
+              },
+              {
+                "stat": "pressure_control",
+                "value": 6
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 6
+              },
+              {
+                "stat": "turnover",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "D",
+            "coach_name": "Test Defense",
+            "overall_rating": 6.0,
+            "bonus_pct": 30,
+            "win_xp_bonus": 0.0324
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 42,
+        "strength": 43.3,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.3182,
+            "away": 0.2685
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.2468,
+            "away": 0.2049
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0.0324,
+          "win": 15.486,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S4c",
+      "schema_version": 2,
+      "name": "Coach isolation: Special Teams only",
+      "description": "Special Teams coach with bonus 30, others empty. Strength rises by 0.15 x ST x 0.30 only.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": "Test Special Teams",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 6
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 6
+              },
+              {
+                "stat": "return_speed",
+                "value": 6
+              },
+              {
+                "stat": "return_coverage",
+                "value": 6
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "ST",
+            "coach_name": "Test Special Teams",
+            "overall_rating": 6.0,
+            "bonus_pct": 30,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 42,
+        "strength": 40.2357,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.2797,
+            "away": 0.234
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.2142,
+            "away": 0.1766
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1,
+          "coach_win_bonus": 0,
+          "win": 15,
+          "loss": 7
+        }
+      }
+    },
+    {
+      "scenario_id": "S6a",
+      "schema_version": 2,
+      "name": "XP order: facility only",
+      "description": "No coaches, film room level 3 (multiplier 1.14). Win XP = 15 x 1.14.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 3
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "overall_rating": 0,
+            "bonus_pct": 0,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 12,
+        "strength": 38.5,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.2592,
+            "away": 0.2159
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.1972,
+            "away": 0.1619
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1.14,
+          "coach_win_bonus": 0,
+          "win": 17.1,
+          "loss": 7.98
+        }
+      }
+    },
+    {
+      "scenario_id": "S6b",
+      "schema_version": 2,
+      "name": "XP order: facility then coach",
+      "description": "Starter coaches and film room level 3. Win XP = 15 x 1.14 x (1 + coach bonus), no floor. The v0.2 spec order (coach first, floored, then facility) gives a different number.",
+      "input": {
+        "roster": [
+          {
+            "slot": "qb",
+            "tier": 1
+          },
+          {
+            "slot": "rb",
+            "tier": 2
+          },
+          {
+            "slot": "ol1",
+            "tier": 2
+          },
+          {
+            "slot": "ol2",
+            "tier": 2
+          },
+          {
+            "slot": "ol3",
+            "tier": 2
+          },
+          {
+            "slot": "r1",
+            "tier": 2
+          },
+          {
+            "slot": "r2",
+            "tier": 2
+          },
+          {
+            "slot": "dl1",
+            "tier": 2
+          },
+          {
+            "slot": "dl2",
+            "tier": 2
+          },
+          {
+            "slot": "dl3",
+            "tier": 2
+          },
+          {
+            "slot": "db1",
+            "tier": 2
+          },
+          {
+            "slot": "db2",
+            "tier": 2
+          },
+          {
+            "slot": "s1",
+            "tier": 2
+          },
+          {
+            "slot": "s2",
+            "tier": 2
+          }
+        ],
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Aldo Donelli",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 1
+              },
+              {
+                "stat": "rush",
+                "value": 1
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 1
+              },
+              {
+                "stat": "play_variation",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": "Ed Khayat",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 1
+              },
+              {
+                "stat": "pressure_control",
+                "value": 1
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 1
+              },
+              {
+                "stat": "turnover",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": "Aaron Kromer",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 1
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 1
+              },
+              {
+                "stat": "return_speed",
+                "value": 1
+              },
+              {
+                "stat": "return_coverage",
+                "value": 1
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 3
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "unit_ratings": [
+          {
+            "unit": "O",
+            "rating": 37.1429
+          },
+          {
+            "unit": "D",
+            "rating": 40.0
+          },
+          {
+            "unit": "ST",
+            "rating": 38.5714
+          }
+        ],
+        "coach_state": [
+          {
+            "role": "O",
+            "coach_name": "Aldo Donelli",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0304
+          },
+          {
+            "role": "D",
+            "coach_name": "Ed Khayat",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0304
+          },
+          {
+            "role": "ST",
+            "coach_name": "Aaron Kromer",
+            "overall_rating": 1.0,
+            "bonus_pct": 5,
+            "win_xp_bonus": 0.0
+          }
+        ],
+        "team_rating": 27,
+        "strength": 40.425,
+        "win_probability": [
+          {
+            "opponent_strength": 58.0,
+            "home": 0.282,
+            "away": 0.236
+          },
+          {
+            "opponent_strength": 63.9,
+            "home": 0.2161,
+            "away": 0.1782
+          }
+        ],
+        "xp": {
+          "base_win": 15,
+          "base_loss": 7,
+          "facility_multiplier": 1.14,
+          "coach_win_bonus": 0.0808,
+          "win": 18.4817,
+          "loss": 7.98
+        },
+        "spec_v02_order_win_xp": 18.24
+      }
+    }
+  ]
+}
