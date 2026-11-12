@@ -109,7 +109,7 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             var playerTeam = new TeamSaveData
             {
                 team_id = Guid.NewGuid().ToString(),
-                player_id = "local_player",
+                player_id = PlayerIdProvider.Get(),
                 team_name = playerTeamName,
                 rating = 1000,
                 is_player_team = true,
@@ -134,9 +134,11 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             // Save season data
             SaveSeasonData(seasonData);
 
-            // Fresh progression for this season's player (history scoped to player_id)
+            // XP is career XP: a new season keeps the player's existing XP, tier and history
+            // (it used to be cleared here). GetState only creates a zeroed state for a player
+            // who has none yet. Season-specific grants carry the season id in their event id,
+            // so a new season never collides with an earlier one's idempotency keys.
             _currentPlayerId = playerTeam.player_id;
-            EnsureProgressionService()?.ClearPlayerProgression(_currentPlayerId);
             EnsureProgressionService()?.GetState(_currentPlayerId, createIfMissing: true);
             Debug.Log($"[LocalSeasonBackend] Season created: {seasonData.season_id} with {seasonData.teams.Count} teams (player: {playerTeam.player_id})");
             onSuccess?.Invoke(seasonData);

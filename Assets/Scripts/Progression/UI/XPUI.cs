@@ -137,31 +137,70 @@ using TMPro;
         /// </summary>
         public static List<int> WeekNumbers(IReadOnlyList<XpHistoryEntry> entries)
         {
-            var weeks = new List<int>(entries.Count);
-            int week = 0;
-            foreach (var entry in entries)
-            {
-                if (SeasonManager.IsMatchSource(entry.source)) week++;
-                weeks.Add(Mathf.Max(1, week));
-            }
+            ComputeWeeks(entries, out var weeks, out _);
             return weeks;
         }
 
         /// <summary>
-        /// XP summed per week (full precision), in week order - one bar per week for the chart.
+        /// XP summed per week (full precision), in order - one bar per week for the chart.
+        /// XP is career XP, so the history spans several seasons: bars are grouped by played
+        /// week (not by the "Week N" label, which restarts every season) and keep that label.
         /// </summary>
         public static List<KeyValuePair<int, float>> TotalsByWeek(IReadOnlyList<XpHistoryEntry> entries)
         {
-            var weeks = WeekNumbers(entries);
+            ComputeWeeks(entries, out var weeks, out var groups);
             var totals = new List<KeyValuePair<int, float>>();
+            int lastGroup = -1;
             for (int i = 0; i < entries.Count; i++)
             {
-                if (totals.Count > 0 && totals[totals.Count - 1].Key == weeks[i])
+                if (totals.Count > 0 && groups[i] == lastGroup)
                     totals[totals.Count - 1] = new KeyValuePair<int, float>(weeks[i], totals[totals.Count - 1].Value + entries[i].xp_gained);
                 else
                     totals.Add(new KeyValuePair<int, float>(weeks[i], entries[i].xp_gained));
+                lastGroup = groups[i];
             }
             return totals;
+        }
+
+        // weeks: the "Week N" label, counted from 1 within each season. groups: a counter that
+        // advances at every match entry, so entries of the same played week share a group even
+        // when two seasons' week numbers happen to match.
+        private static void ComputeWeeks(IReadOnlyList<XpHistoryEntry> entries, out List<int> weeks, out List<int> groups)
+        {
+            weeks = new List<int>(entries.Count);
+            groups = new List<int>(entries.Count);
+            int week = 0;
+            int group = 0;
+            string season = null;
+            foreach (var entry in entries)
+            {
+                if (SeasonManager.IsMatchSource(entry.source))
+                {
+                    group++;
+                    string entrySeason = SeasonIdOf(entry);
+                    // A match from a different season starts that season's week 1. Entries
+                    // without a season id (older saves, tests) stay in the current season.
+                    if (entrySeason != null && season != null && entrySeason != season) week = 0;
+                    if (entrySeason != null) season = entrySeason;
+                    week++;
+                }
+                weeks.Add(Mathf.Max(1, week));
+                groups.Add(group);
+            }
+        }
+
+        /// <summary>
+        /// Season id embedded in a season-scoped grant's event id ("{season}:week:N:match",
+        /// "{season}:week:N:training", "{season}:season_reward"), or null for any other entry.
+        /// </summary>
+        public static string SeasonIdOf(XpHistoryEntry entry)
+        {
+            string id = entry?.id;
+            if (string.IsNullOrEmpty(id)) return null;
+
+            int cut = id.IndexOf(":week:", System.StringComparison.Ordinal);
+            if (cut < 0) cut = id.IndexOf(":season_reward", System.StringComparison.Ordinal);
+            return cut > 0 ? id.Substring(0, cut) : null;
         }
 
         /// <summary>

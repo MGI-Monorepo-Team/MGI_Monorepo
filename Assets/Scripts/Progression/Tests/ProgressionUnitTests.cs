@@ -66,6 +66,7 @@ public static class ProgressionUnitTests
         // created (which warms up LocalSeasonBackend's ProgressionService reference)
         // before any match simulation or season-end rewards can occur.
         Test_CreateSeason_InitializesPlayerProgression(backend, progression);
+        Test_CreateSeason_KeepsCareerXp(backend, progression);
         Test_AwardSeasonRewards_PlacementXp(backend, progression);
         Test_SimulateWeek_AwardsMatchXpAndAdvancesWeek(backend, progression);
         Test_SimulateWeek_RejectsPastFinalWeek(backend);
@@ -77,6 +78,7 @@ public static class ProgressionUnitTests
         Test_MidSeasonWeek_DoesNotAwardSeasonReward(backend, progression);
         Test_LastMatchProperties_IgnoreTrainingEntry(progression);
         Test_XpScreen_GroupsEntriesByWeek();
+        Test_XpScreen_WeekLabelsRestartEachSeason();
 
         // Leave no residue in mgi_state for the test player.
         progression.ClearPlayerProgression(TestPlayerId);
@@ -389,33 +391,107 @@ public static class ProgressionUnitTests
 
     private static void Test_CreateSeason_InitializesPlayerProgression(LocalSeasonBackend backend, ProgressionService progression)
     {
-        SeasonSaveData created = null;
-        string error = null;
-        backend.CreateSeason(new List<string> { "Jets", "Hawks" }, "MyTeam", s => created = s, e => error = e);
-
-        Assert(error == null, $"CreateSeason_InitializesPlayerProgression: no error ({error})");
-        Assert(created != null, "CreateSeason_InitializesPlayerProgression: season returned");
-        if (created != null)
+        // Run as a throwaway profile (CreateSeason uses the active profile, PlayerIdProvider) so the
+        // test neither reads nor clears a developer's real "local_player" career XP.
+        WithActivePlayer(CareerTestPlayerId, () =>
         {
-            AssertEqual(3, created.teams.Count, "CreateSeason_InitializesPlayerProgression: team count (2 AI + player)");
+            progression.ClearPlayerProgression(CareerTestPlayerId);
 
-            var playerTeam = created.teams.FirstOrDefault(t => t.is_player_team);
-            Assert(playerTeam != null, "CreateSeason_InitializesPlayerProgression: player team present");
-            if (playerTeam != null)
+            SeasonSaveData created = null;
+            string error = null;
+            backend.CreateSeason(new List<string> { "Jets", "Hawks" }, "MyTeam", s => created = s, e => error = e);
+
+            Assert(error == null, $"CreateSeason_InitializesPlayerProgression: no error ({error})");
+            Assert(created != null, "CreateSeason_InitializesPlayerProgression: season returned");
+            if (created != null)
             {
-                var state = progression.GetState(playerTeam.player_id, createIfMissing: false);
-                Assert(state != null, "CreateSeason_InitializesPlayerProgression: progression state created for player");
-                if (state != null)
-                {
-                    AssertEqual(0, state.current_xp, "CreateSeason_InitializesPlayerProgression: starts at 0 XP");
-                }
+                AssertEqual(3, created.teams.Count, "CreateSeason_InitializesPlayerProgression: team count (2 AI + player)");
 
-                // NOTE: CreateSeason hardcodes player_id = "local_player" (LocalSeasonBackend.cs:117),
-                // not the canonical device-id convention the DM testing doc calls for. Cleaning up
-                // whatever state this created so the test doesn't leave real "local_player" residue.
-                progression.ClearPlayerProgression(playerTeam.player_id);
+                var playerTeam = created.teams.FirstOrDefault(t => t.is_player_team);
+                Assert(playerTeam != null, "CreateSeason_InitializesPlayerProgression: player team present");
+                if (playerTeam != null)
+                {
+                    AssertEqual(CareerTestPlayerId, playerTeam.player_id, "CreateSeason_InitializesPlayerProgression: player team uses the active profile id");
+                    var state = progression.GetState(playerTeam.player_id, createIfMissing: false);
+                    Assert(state != null, "CreateSeason_InitializesPlayerProgression: progression state created for player");
+                    if (state != null)
+                    {
+                        AssertEqual(0, state.current_xp, "CreateSeason_InitializesPlayerProgression: a player with no XP starts at 0 XP");
+                    }
+                }
+            }
+
+            progression.ClearPlayerProgression(CareerTestPlayerId);
+        });
+    }
+
+    private const string CareerTestPlayerId = "__unit_test_progression_career__";
+
+    // Runs body with PlayerIdProvider pointing at playerId, restoring the previous PlayerPrefs
+    // value afterwards (same pattern as CanonicalPlayerIdIntegrationTests).
+    private static void WithActivePlayer(string playerId, Action body)
+    {
+        bool hadPrevious = PlayerPrefs.HasKey(PlayerIdProvider.PlayerPrefsKey);
+        string previous = PlayerPrefs.GetString(PlayerIdProvider.PlayerPrefsKey);
+        try
+        {
+            PlayerIdProvider.Set(playerId);
+            body();
+        }
+        finally
+        {
+            if (hadPrevious)
+                PlayerIdProvider.Set(previous);
+            else
+            {
+                PlayerPrefs.DeleteKey(PlayerIdProvider.PlayerPrefsKey);
+                PlayerPrefs.Save();
             }
         }
+    }
+
+    // XP is career XP: creating a new season (every launch calls it) must keep the player's
+    // XP, tier and history, and the new season's grants must stack on top without colliding
+    // with the earlier season's idempotency keys.
+    private static void Test_CreateSeason_KeepsCareerXp(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        WithActivePlayer(CareerTestPlayerId, () =>
+        {
+            progression.ClearPlayerProgression(CareerTestPlayerId);
+            progression.AddXp(CareerTestPlayerId, 40, "unit_test", Guid.NewGuid().ToString());
+            progression.AddXp(CareerTestPlayerId, 20, "unit_test", Guid.NewGuid().ToString());
+            AssertEqual("pro", progression.GetState(CareerTestPlayerId).current_tier, "CareerXp: setup - 60 XP is pro");
+
+            string error = null;
+            SeasonSaveData season2 = null;
+            backend.CreateSeason(new List<string> { "Jets", "Hawks" }, "MyTeam", s => season2 = s, e => error = e);
+            Assert(error == null && season2 != null, $"CareerXp: a new season is created ({error})");
+            if (season2 == null) return;
+
+            var state = progression.GetState(CareerTestPlayerId, createIfMissing: false);
+            AssertEqual(60f, state.current_xp, "CareerXp: XP survives a new season", XpTolerance);
+            AssertEqual("pro", state.current_tier, "CareerXp: tier survives a new season");
+            AssertEqual(2, state.xp_history.Count, "CareerXp: XP history survives a new season");
+
+            // The new season's first week stacks on the carried total.
+            backend.SimulateWeek(season2, s => { }, e => error = e);
+            state = progression.GetState(CareerTestPlayerId, createIfMissing: false);
+            Assert(state.current_xp > 60f, $"CareerXp: the new season's XP adds to the carried total (got {state.current_xp})");
+            AssertEqual(4, state.xp_history.Count, "CareerXp: the new season's match + training are appended to the history");
+
+            // A third season: week 1 again must not collide with season 2's week-1 event ids.
+            SeasonSaveData season3 = null;
+            float beforeSeason3 = state.current_xp;
+            backend.CreateSeason(new List<string> { "Jets", "Hawks" }, "MyTeam", s => season3 = s, e => error = e);
+            AssertEqual(beforeSeason3, progression.GetState(CareerTestPlayerId, createIfMissing: false).current_xp,
+                "CareerXp: creating another season changes nothing", XpTolerance);
+            backend.SimulateWeek(season3, s => { }, e => error = e);
+            state = progression.GetState(CareerTestPlayerId, createIfMissing: false);
+            AssertEqual(6, state.xp_history.Count, "CareerXp: season 3 week 1 is awarded too (event ids are per season)");
+            Assert(state.current_xp > beforeSeason3, "CareerXp: season 3 week 1 XP is added");
+
+            progression.ClearPlayerProgression(CareerTestPlayerId);
+        });
     }
 
     private static void Test_SimulateWeek_AwardsMatchXpAndAdvancesWeek(LocalSeasonBackend backend, ProgressionService progression)
@@ -664,6 +740,37 @@ public static class ProgressionUnitTests
 
         Assert(XPUI.WeekNumbers(new List<XpHistoryEntry> { E(25, "duplicate_card_rare"), E(15, "match_win") }).SequenceEqual(new[] { 1, 1 }),
             "XpScreen: an entry before the first match counts as week 1");
+    }
+
+    // XP is career XP, so the history spans seasons. "Week N" must restart at 1 in each season
+    // (the hub shows "Week N of 10"), and a season that only got one week in must not be merged
+    // with the next season's week 1 just because both are labelled "W1".
+    private static void Test_XpScreen_WeekLabelsRestartEachSeason()
+    {
+        XpHistoryEntry S(string season, int week, string kind, float xp) =>
+            new XpHistoryEntry("p", xp, kind == "match" ? "match_win" : "training") { id = $"{season}:week:{week}:{kind}" };
+
+        var entries = new List<XpHistoryEntry>
+        {
+            S("seasonA", 1, "match", 15), S("seasonA", 1, "training", 2),
+            S("seasonA", 2, "match", 15), S("seasonA", 2, "training", 2),
+            S("seasonB", 1, "match", 15), S("seasonB", 1, "training", 2),
+            S("seasonC", 1, "match", 15), S("seasonC", 1, "training", 2)
+        };
+        Assert(XPUI.WeekNumbers(entries).SequenceEqual(new[] { 1, 1, 2, 2, 1, 1, 1, 1 }),
+            "XpScreen seasons: the week label restarts at 1 for each new season");
+
+        var totals = XPUI.TotalsByWeek(entries);
+        Assert(totals.Select(t => t.Key).SequenceEqual(new[] { 1, 2, 1, 1 }),
+            "XpScreen seasons: one bar per played week, labelled with the season's own week number");
+        Assert(totals.All(t => Mathf.Abs(t.Value - 17f) < XpTolerance),
+            "XpScreen seasons: adjacent seasons' W1 bars are not merged (each is match + training)");
+
+        AssertEqual("seasonA", XPUI.SeasonIdOf(entries[0]), "XpScreen seasons: season id is read from a match grant id");
+        AssertEqual("seasonB", XPUI.SeasonIdOf(new XpHistoryEntry("p", 30f, "season_reward") { id = "seasonB:season_reward" }),
+            "XpScreen seasons: season id is read from a season-reward grant id");
+        Assert(XPUI.SeasonIdOf(new XpHistoryEntry("p", 9f, "duplicate_card_rare")) == null,
+            "XpScreen seasons: entries without a season id have none");
     }
 
     private static void Test_SimulateWeek_RejectsPastFinalWeek(LocalSeasonBackend backend)
