@@ -34,7 +34,7 @@ public class ProgressionSummaryPanel : MonoBehaviour
         }
 
         string tierDisplayName = currentTier;
-        int tierMaxXp = 0;
+        int currentTierMinXp = 0;
         string nextTierDisplayName = null;
         int nextTierMinXp = 0;
 
@@ -45,19 +45,20 @@ public class ProgressionSummaryPanel : MonoBehaviour
             if (tiers != null && tiers.TryGetValue(currentTier, out var tierToken))
             {
                 tierDisplayName = tierToken.Value<string>("display_name") ?? currentTier;
-                tierMaxXp = tierToken.Value<int?>("max_xp") ?? 0;
+                currentTierMinXp = tierToken.Value<int?>("min_xp") ?? 0;
             }
 
             if (tiers != null)
             {
+                // The next tier is the one with the smallest min_xp above the current tier's.
+                // (Only min_xp is configured - there is no max_xp to match against.)
                 foreach (var prop in tiers.Properties())
                 {
                     int min = prop.Value.Value<int?>("min_xp") ?? 0;
-                    if (min == tierMaxXp + 1)
+                    if (min > currentTierMinXp && (nextTierDisplayName == null || min < nextTierMinXp))
                     {
                         nextTierDisplayName = prop.Value.Value<string>("display_name");
                         nextTierMinXp = min;
-                        break;
                     }
                 }
             }

@@ -61,6 +61,7 @@ public static class ProgressionUnitTests
         Test_AddXp_KeepsFractionalXp_AndAccumulatesWithoutDrift(progression);
         Test_FractionalXp_SurvivesReloadFromDisk(progression);
         Test_TierLookup_HandlesFractionalXpAndXpBeyondLastTier(progression);
+        Test_LoadingSave_ReconcilesStaleTier(progression);
 
         // CreateSeason runs first, matching real gameplay order: a season must be
         // created (which warms up LocalSeasonBackend's ProgressionService reference)
@@ -113,30 +114,39 @@ public static class ProgressionUnitTests
     {
         progression.ClearPlayerProgression(TestPlayerId);
 
-        // Walk up to exactly 49 -> still rookie
-        progression.AddXp(TestPlayerId, 49, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("rookie", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 49 XP is rookie");
+        // Walk up through every boundary the config declares: one XP short of a tier's min
+        // is still the tier below, and exactly its min is the tier. No threshold is written
+        // here, so changing progression.json needs no test edit.
+        var tiers = SortedTiers(progression);
+        AssertEqual("rookie", tiers[0].Key, "TierBoundaries: the lowest tier is rookie");
+        AssertEqual(0, tiers[0].Value.min_xp, "TierBoundaries: rookie starts at 0 XP");
 
-        // Cross into pro at 50
-        progression.AddXp(TestPlayerId, 1, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("pro", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 50 XP is pro");
+        int xp = 0;
+        for (int i = 1; i < tiers.Count; i++)
+        {
+            string below = tiers[i - 1].Key;
+            string tier = tiers[i].Key;
+            int min = tiers[i].Value.min_xp;
 
-        // Up to 99 -> still pro
-        progression.AddXp(TestPlayerId, 49, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("pro", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 99 XP is pro");
+            if (min - 1 > xp)
+            {
+                progression.AddXp(TestPlayerId, min - 1 - xp, "unit_test", Guid.NewGuid().ToString());
+                xp = min - 1;
+            }
+            AssertEqual(below, progression.GetState(TestPlayerId).current_tier, $"TierBoundaries: {xp} XP is {below}");
 
-        // Cross into all_star at 100
-        progression.AddXp(TestPlayerId, 1, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("all_star", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 100 XP is all_star");
-
-        // Up to 149 -> still all_star
-        progression.AddXp(TestPlayerId, 49, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("all_star", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 149 XP is all_star");
-
-        // Cross into legend at 150
-        progression.AddXp(TestPlayerId, 1, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("legend", progression.GetState(TestPlayerId).current_tier, "TierBoundaries: 150 XP is legend");
+            progression.AddXp(TestPlayerId, min - xp, "unit_test", Guid.NewGuid().ToString());
+            xp = min;
+            AssertEqual(tier, progression.GetState(TestPlayerId).current_tier, $"TierBoundaries: {xp} XP is {tier}");
+        }
     }
+
+    // The loaded tiers, lowest first.
+    private static List<KeyValuePair<string, TierData>> SortedTiers(ProgressionService progression) =>
+        progression.GetAllTiers().OrderBy(kvp => kvp.Value.min_xp).ToList();
+
+    private static int TierMinXp(ProgressionService progression, string tierKey) =>
+        progression.GetAllTiers()[tierKey].min_xp;
 
     private static void Test_AddXp_NonPositiveIsNoOp(ProgressionService progression)
     {
@@ -197,24 +207,33 @@ public static class ProgressionUnitTests
     private static void Test_GetAllTiers_MatchesConfig(ProgressionService progression)
     {
         var tiers = progression.GetAllTiers();
-        AssertEqual(4, tiers.Count, "GetAllTiers_MatchesConfig: tier count");
+        var path = Path.Combine(Application.streamingAssetsPath, "Progression", "progression.json");
+        var configTiers = (Newtonsoft.Json.Linq.JObject)Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path))["tier_progression"];
+        AssertEqual(configTiers.Count, tiers.Count, "GetAllTiers_MatchesConfig: tier count matches progression.json");
 
-        AssertTierMatches(tiers, "rookie", 0, 49);
-        AssertTierMatches(tiers, "pro", 50, 99);
-        AssertTierMatches(tiers, "all_star", 100, 149);
-        AssertTierMatches(tiers, "legend", 150, 999);
-    }
-
-    private static void AssertTierMatches(Dictionary<string, TierData> tiers, string key, int expectedMin, int expectedMax)
-    {
-        if (!tiers.TryGetValue(key, out var tier))
+        foreach (var property in configTiers.Properties())
         {
-            Assert(false, $"GetAllTiers_MatchesConfig: '{key}' tier missing");
-            return;
+            if (!tiers.TryGetValue(property.Name, out var tier))
+            {
+                Assert(false, $"GetAllTiers_MatchesConfig: '{property.Name}' tier missing");
+                continue;
+            }
+            AssertEqual(property.Value.Value<int>("min_xp"), tier.min_xp, $"GetAllTiers_MatchesConfig: {property.Name} min_xp");
+            Assert(property.Value["max_xp"] == null, $"GetAllTiers_MatchesConfig: {property.Name} configures only min_xp (the top is derived)");
         }
 
-        AssertEqual(expectedMin, tier.min_xp, $"GetAllTiers_MatchesConfig: {key} min_xp");
-        AssertEqual(expectedMax, tier.max_xp, $"GetAllTiers_MatchesConfig: {key} max_xp");
+        // Derived ranges: each tier ends one XP before the next begins, so there is no gap and no
+        // overlap, and the top tier is open-ended (it used to stop at a made-up 999).
+        var sorted = SortedTiers(progression);
+        for (int i = 0; i < sorted.Count - 1; i++)
+        {
+            AssertEqual(sorted[i + 1].Value.min_xp - 1, sorted[i].Value.max_xp, $"GetAllTiers_MatchesConfig: {sorted[i].Key} ends one XP before {sorted[i + 1].Key} starts");
+            Assert(!sorted[i].Value.IsOpenEnded(), $"GetAllTiers_MatchesConfig: {sorted[i].Key} is bounded");
+        }
+        var top = sorted[sorted.Count - 1].Value;
+        Assert(top.IsOpenEnded(), "GetAllTiers_MatchesConfig: the top tier has no upper bound");
+        AssertEqual($"{top.min_xp}+", top.XpRangeLabel(), "GetAllTiers_MatchesConfig: the top tier's range label is open-ended");
+        AssertEqual($"{sorted[0].Value.min_xp} - {sorted[1].Value.min_xp - 1}", sorted[0].Value.XpRangeLabel(), "GetAllTiers_MatchesConfig: a bounded tier's range label shows both ends");
     }
 
     private static void Test_ClearPlayerProgression_ResetsState(ProgressionService progression)
@@ -307,16 +326,80 @@ public static class ProgressionUnitTests
 
     private static void Test_TierLookup_HandlesFractionalXpAndXpBeyondLastTier(ProgressionService progression)
     {
-        // The tier config uses whole-number ranges (rookie 0-49, pro 50-99, ...). Fractional
-        // XP between one range's max and the next range's min (e.g. 99.5) used to match no
-        // tier at all and fall back to rookie; so did any XP above the last range's max.
-        AssertEqual("rookie", TierFor(progression, 49.5f), "TierLookup: 49.5 XP is rookie");
-        AssertEqual("pro", TierFor(progression, 50f), "TierLookup: 50 XP is pro");
-        AssertEqual("pro", TierFor(progression, 99.5f), "TierLookup: 99.5 XP is pro, not rookie");
-        AssertEqual("all_star", TierFor(progression, 100f), "TierLookup: 100 XP is all_star");
-        AssertEqual("all_star", TierFor(progression, 149.9f), "TierLookup: 149.9 XP is all_star, not rookie");
-        AssertEqual("legend", TierFor(progression, 150f), "TierLookup: 150 XP is legend");
-        AssertEqual("legend", TierFor(progression, 5000f), "TierLookup: XP above the last range's max stays legend");
+        // Tier ranges are whole numbers, so fractional XP just below a tier's min (e.g. 99.5)
+        // used to match no tier at all and fall back to rookie; so did any XP above the old top
+        // range. Checked against every boundary the config declares.
+        var tiers = SortedTiers(progression);
+        for (int i = 0; i < tiers.Count; i++)
+        {
+            string tier = tiers[i].Key;
+            int min = tiers[i].Value.min_xp;
+
+            if (i > 0)
+                AssertEqual(tiers[i - 1].Key, TierFor(progression, min - 0.5f), $"TierLookup: {min - 0.5f} XP is {tiers[i - 1].Key}, not rookie");
+            AssertEqual(tier, TierFor(progression, min), $"TierLookup: {min} XP is {tier}");
+            if (i + 1 < tiers.Count)
+                AssertEqual(tier, TierFor(progression, tiers[i + 1].Value.min_xp - 0.1f), $"TierLookup: {tiers[i + 1].Value.min_xp - 0.1f} XP is still {tier}");
+        }
+
+        var last = tiers[tiers.Count - 1];
+        AssertEqual(last.Key, TierFor(progression, last.Value.min_xp * 10f + 1f), "TierLookup: XP far above the top tier's start stays in the top tier");
+    }
+
+    // A save's stored tier can disagree with its own XP (thresholds changed since it was written,
+    // or it was edited by hand). Loading it must correct the tier, and write the correction back
+    // because Facilities reads progression_state.json directly for its upgrade gate.
+    private static void Test_LoadingSave_ReconcilesStaleTier(ProgressionService progression)
+    {
+        var tiers = SortedTiers(progression);
+        var top = tiers[tiers.Count - 1];
+
+        // Stored tier too low for the XP.
+        WriteStoredProgression(TestPlayerId, top.Value.min_xp, "rookie");
+        var state = progression.GetState(TestPlayerId, createIfMissing: false);
+        AssertEqual(top.Key, state?.current_tier, "StaleTier: a tier that is too low for the XP is corrected on load");
+        AssertEqual((float)top.Value.min_xp, state?.current_xp ?? -1f, "StaleTier: the XP itself is left alone", XpTolerance);
+        AssertEqual(top.Key, ReadStoredTier(TestPlayerId), "StaleTier: the correction is written back to progression_state.json");
+
+        var gatesPath = Path.Combine(Application.streamingAssetsPath, "Facilities", "facilities_config.json");
+        int expectedGate = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(gatesPath))["tier_upgrade_gates"].Value<int>(top.Key);
+        AssertEqual(expectedGate, new FacilitiesService().GetMaxFacilityLevelForPlayerTier(TestPlayerId),
+            "StaleTier: Facilities' upgrade gate sees the corrected tier");
+
+        // Stored tier too high for the XP (thresholds were raised): it drops, consistently.
+        WriteStoredProgression(TestPlayerId, 0, top.Key);
+        state = progression.GetState(TestPlayerId, createIfMissing: false);
+        AssertEqual("rookie", state?.current_tier, "StaleTier: a tier that is too high for the XP is corrected on load");
+        AssertEqual("rookie", ReadStoredTier(TestPlayerId), "StaleTier: the downward correction is written back too");
+
+        // A save that is already consistent is left as it is.
+        WriteStoredProgression(TestPlayerId, tiers[1].Value.min_xp, tiers[1].Key);
+        AssertEqual(tiers[1].Key, progression.GetState(TestPlayerId, createIfMissing: false)?.current_tier, "StaleTier: a consistent save keeps its tier");
+
+        progression.ClearPlayerProgression(TestPlayerId);
+    }
+
+    // Writes progression_state.json as an older build would have, and drops the cached state so
+    // the next GetState reads it from disk.
+    private static void WriteStoredProgression(string playerId, float xp, string tier)
+    {
+        var progression = ProgressionService.Instance;
+        progression.ClearPlayerProgression(playerId);
+
+        string path = FilePathResolver.GetProgressionPath(playerId, "progression_state.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, new Newtonsoft.Json.Linq.JObject
+        {
+            ["player_id"] = playerId,
+            ["current_xp"] = xp,
+            ["current_tier"] = tier
+        }.ToString());
+    }
+
+    private static string ReadStoredTier(string playerId)
+    {
+        string path = FilePathResolver.GetProgressionPath(playerId, "progression_state.json");
+        return Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path)).Value<string>("current_tier");
     }
 
     private static string TierFor(ProgressionService progression, float xp)
@@ -458,9 +541,11 @@ public static class ProgressionUnitTests
         WithActivePlayer(CareerTestPlayerId, () =>
         {
             progression.ClearPlayerProgression(CareerTestPlayerId);
-            progression.AddXp(CareerTestPlayerId, 40, "unit_test", Guid.NewGuid().ToString());
+            // Enough XP to be exactly at the pro threshold (read from the config), in two grants.
+            int careerXp = TierMinXp(progression, "pro");
+            progression.AddXp(CareerTestPlayerId, careerXp - 20, "unit_test", Guid.NewGuid().ToString());
             progression.AddXp(CareerTestPlayerId, 20, "unit_test", Guid.NewGuid().ToString());
-            AssertEqual("pro", progression.GetState(CareerTestPlayerId).current_tier, "CareerXp: setup - 60 XP is pro");
+            AssertEqual("pro", progression.GetState(CareerTestPlayerId).current_tier, $"CareerXp: setup - {careerXp} XP is pro");
 
             string error = null;
             SeasonSaveData season2 = null;
@@ -469,14 +554,14 @@ public static class ProgressionUnitTests
             if (season2 == null) return;
 
             var state = progression.GetState(CareerTestPlayerId, createIfMissing: false);
-            AssertEqual(60f, state.current_xp, "CareerXp: XP survives a new season", XpTolerance);
+            AssertEqual((float)careerXp, state.current_xp, "CareerXp: XP survives a new season", XpTolerance);
             AssertEqual("pro", state.current_tier, "CareerXp: tier survives a new season");
             AssertEqual(2, state.xp_history.Count, "CareerXp: XP history survives a new season");
 
             // The new season's first week stacks on the carried total.
             backend.SimulateWeek(season2, s => { }, e => error = e);
             state = progression.GetState(CareerTestPlayerId, createIfMissing: false);
-            Assert(state.current_xp > 60f, $"CareerXp: the new season's XP adds to the carried total (got {state.current_xp})");
+            Assert(state.current_xp > careerXp, $"CareerXp: the new season's XP adds to the carried total (got {state.current_xp})");
             AssertEqual(4, state.xp_history.Count, "CareerXp: the new season's match + training are appended to the history");
 
             // A third season: week 1 again must not collide with season 2's week-1 event ids.
@@ -991,14 +1076,16 @@ public static class ProgressionUnitTests
         Assert(!weightTo3, "TierGate: rookie cannot upgrade Weight Room past level 2 either");
         AssertEqual(2, weightState?.level ?? -1, "TierGate: Weight Room stays at level 2");
 
-        // 49 XP is still rookie - the gate must not open early.
-        progression.AddXp(gatePlayer, 49, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("rookie", progression.GetState(gatePlayer).current_tier, "TierGate: 49 XP is still rookie");
-        Assert(!facilities.TryUpgradeFacility(gatePlayer, facility, out _), "TierGate: 49 XP does not unlock level 3");
+        // One XP short of pro is still rookie - the gate must not open early. (The pro threshold
+        // comes from progression.json, so a threshold change needs no edit here.)
+        int proMin = TierMinXp(progression, "pro");
+        progression.AddXp(gatePlayer, proMin - 1, "unit_test", Guid.NewGuid().ToString());
+        AssertEqual("rookie", progression.GetState(gatePlayer).current_tier, $"TierGate: {proMin - 1} XP is still rookie");
+        Assert(!facilities.TryUpgradeFacility(gatePlayer, facility, out _), $"TierGate: {proMin - 1} XP does not unlock level 3");
 
-        // 50 XP crosses into pro - level 3 opens.
+        // Reaching the pro threshold crosses into pro - level 3 opens.
         progression.AddXp(gatePlayer, 1, "unit_test", Guid.NewGuid().ToString());
-        AssertEqual("pro", progression.GetState(gatePlayer).current_tier, "TierGate: 50 XP is pro");
+        AssertEqual("pro", progression.GetState(gatePlayer).current_tier, $"TierGate: {proMin} XP is pro");
         AssertEqual(3, facilities.GetMaxFacilityLevelForPlayerTier(gatePlayer), "TierGate: pro max facility level is 3");
         Assert(facilities.CanUpgradeFacility(gatePlayer, facility, out _), "TierGate: CanUpgradeFacility allows level 3 once pro");
 

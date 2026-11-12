@@ -70,7 +70,7 @@ public class RewardsUI : MonoBehaviour
             if (fields.Length >= 3)
             {
                 fields[0].text = tier.display_name;
-                fields[1].text = $"{tier.min_xp} - {tier.max_xp} XP";
+                fields[1].text = $"{tier.XpRangeLabel()} XP";
                 fields[2].text = tier.unlock_features != null && tier.unlock_features.Count > 0
                     ? string.Join(", ", tier.unlock_features)
                     : "-";

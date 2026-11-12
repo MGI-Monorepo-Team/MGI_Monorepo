@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using SimpleJSON;
 
@@ -78,6 +79,15 @@ public class ProgressionService : MonoBehaviour
         var state = LoadProgressionStateFromDisk(playerId);
         if (state != null)
         {
+            // A stored tier is only recomputed when XP is next awarded, so a save written
+            // under different thresholds (or edited by hand) can disagree with its own XP.
+            // Reconcile it now, and write the fix back: Facilities reads the tier straight
+            // from progression_state.json for its upgrade gate.
+            if (ReconcileStoredTier(state))
+            {
+                SaveProgressionStateToDisk(state);
+            }
+
             _progressionCache[playerId] = state;
             return state;
         }
@@ -247,6 +257,24 @@ public class ProgressionService : MonoBehaviour
     }
 
    
+    /// <summary>
+    /// Sets state.current_tier to the tier its XP earns under the current config. Returns true
+    /// if it changed. Does nothing while the config is not loaded (CalculateTierForXp would
+    /// answer "rookie" and wrongly demote everyone).
+    /// </summary>
+    private bool ReconcileStoredTier(PlayerProgressionState state)
+    {
+        if (_progressionConfig == null) return false;
+
+        string expected = CalculateTierForXp(state.current_xp);
+        if (string.Equals(state.current_tier, expected, StringComparison.Ordinal)) return false;
+
+        Debug.Log($"[ProgressionService] Stored tier '{state.current_tier}' for {state.player_id} does not match " +
+                  $"{state.current_xp} XP; corrected to '{expected}'.");
+        state.current_tier = expected;
+        return true;
+    }
+
     private string CalculateTierForXp(float totalXp)
     {
         if (_progressionConfig == null)
@@ -497,10 +525,11 @@ public class ProgressionService : MonoBehaviour
             {
                 var tierName = kvp.Key;
                 var tierNode = kvp.Value;
+                // Only min_xp is configured; max_xp is derived below so the ranges can never
+                // leave a gap (or overlap) between tiers.
                 var tierData = new TierData
                 {
                     min_xp = tierNode["min_xp"].AsInt,
-                    max_xp = tierNode["max_xp"].AsInt,
                     display_name = tierNode["display_name"].Value,
                     unlock_features = new List<string>()
                 };
@@ -511,6 +540,21 @@ public class ProgressionService : MonoBehaviour
                 }
 
                 _tiers[tierName] = tierData;
+            }
+
+            DeriveTierRanges(_tiers.Values);
+        }
+
+        /// <summary>
+        /// Each tier runs up to (but not including) the next tier's min_xp; the highest tier has
+        /// no upper bound. Display only - GetTierForXp uses min_xp alone.
+        /// </summary>
+        private static void DeriveTierRanges(IEnumerable<TierData> tiers)
+        {
+            var ordered = tiers.OrderBy(t => t.min_xp).ToList();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                ordered[i].max_xp = i + 1 < ordered.Count ? ordered[i + 1].min_xp - 1 : TierData.OpenEnded;
             }
         }
 
@@ -553,9 +597,9 @@ public class ProgressionService : MonoBehaviour
 
         public string GetTierForXp(float totalXp)
         {
-            // Highest tier whose minimum has been reached. The config's max_xp values
-            // are whole numbers (49, 99, ...), so matching "min <= xp <= max" would
-            // leave fractional XP such as 99.5 in a gap that no tier covers.
+            // Highest tier whose minimum has been reached. Only min_xp is used, so fractional
+            // XP such as 99.5 can never fall in a gap between one tier's whole-number max and
+            // the next tier's min.
             string currentTier = "rookie";
             int bestMin = int.MinValue;
             foreach (var kvp in _tiers)

@@ -14,25 +14,21 @@
   "tier_progression": {
     "rookie": {
       "min_xp": 0,
-      "max_xp": 49,
       "display_name": "Rookie",
       "unlock_features": ["basic_training", "match_participation"]
     },
     "pro": {
       "min_xp": 50,
-      "max_xp": 99,
       "display_name": "Pro",
       "unlock_features": ["advanced_training", "team_selection"]
     },
     "all_star": {
       "min_xp": 100,
-      "max_xp": 149,
       "display_name": "All-Star",
       "unlock_features": ["elite_training", "captain_roles"]
     },
     "legend": {
       "min_xp": 150,
-      "max_xp": 999,
       "display_name": "Legend",
       "unlock_features": ["legendary_training", "mentorship_program"]
     }
