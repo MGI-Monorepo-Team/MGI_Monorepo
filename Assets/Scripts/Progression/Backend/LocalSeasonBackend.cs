@@ -340,31 +340,16 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 throw new InvalidOperationException("XP reward rules are unavailable (progression.json), so no season reward can be awarded");
             }
 
-            // Sort teams by points (ranking)
-            var rankedTeams = seasonData.teams
-                .Where(t => t != null && t.is_player_team)
-                .OrderByDescending(t => t.stats.points)
-                .ToList();
-
-            if (rankedTeams.Count == 0)
+            var playerTeam = seasonData.teams.FirstOrDefault(t => t != null && t.is_player_team);
+            if (playerTeam == null)
             {
                 throw new Exception("No player team found in season data");
             }
 
-            var playerTeam = rankedTeams.First();
-            int placement = 1;
-            int xpReward = 0;
-
-            // Determine placement and reward
-            // This is simplified - in a real scenario, you'd rank all teams
-            var allTeamsByPoints = seasonData.teams
-                .Where(t => t != null && t.stats != null)
-                .OrderByDescending(t => t.stats.points)
-                .ToList();
-
-            placement = allTeamsByPoints.FindIndex(t => t.is_player_team) + 1;
-
-            xpReward = rules.SeasonRewardForPlacement(placement);
+            // Same ranking the hub displays. Teams tied on points and wins share the better
+            // placement, so a tie is never decided by the order teams are stored in.
+            int placement = SeasonStandings.PlacementOf(seasonData.teams, playerTeam);
+            int xpReward = rules.SeasonRewardForPlacement(placement);
             if (xpReward <= 0)
             {
                 // No reward for 4th place or lower

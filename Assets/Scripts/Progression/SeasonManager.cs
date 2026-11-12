@@ -95,12 +95,9 @@ public class SeasonManager : MonoBehaviour
         {
             if (Teams == null || Teams.Count == 0) return 0;
 
-            var sorted = Teams.OrderByDescending(t => t.stats.points)
-                              .ThenByDescending(t => t.stats.wins)
-                              .ToList();
-
-            var playerIndex = sorted.FindIndex(t => t.is_player_team);
-            return playerIndex >= 0 ? playerIndex + 1 : 0;
+            // Shared with the season-end XP reward (SeasonStandings), so the rank shown here is
+            // the placement that gets paid. Teams tied on points and wins share the better rank.
+            return SeasonStandings.PlacementOf(Teams, PlayerTeam);
         }
     }
 

@@ -69,6 +69,8 @@ public static class ProgressionUnitTests
         Test_CreateSeason_InitializesPlayerProgression(backend, progression);
         Test_CreateSeason_KeepsCareerXp(backend, progression);
         Test_AwardSeasonRewards_PlacementXp(backend, progression);
+        Test_SeasonPlacement_TiesShareTheBetterPlacement(backend, progression);
+        Test_PlayerRank_MatchesTheRewardPlacement(progression);
         Test_SimulateWeek_AwardsMatchXpAndAdvancesWeek(backend, progression);
         Test_SimulateWeek_RejectsPastFinalWeek(backend);
 
@@ -470,6 +472,97 @@ public static class ProgressionUnitTests
         }
 
         return season;
+    }
+
+    // ---------------- Tied standings ----------------
+
+    // A season with one team per entry of pointsByTeam; the player's team is the LAST row, as
+    // CreateSeason stores it - the position that used to lose every tie.
+    private static SeasonSaveData BuildSeasonWithPoints(params int[] pointsByTeam)
+    {
+        var season = new SeasonSaveData
+        {
+            season_id = Guid.NewGuid().ToString(),
+            current_week = 5,
+            total_weeks = 10,
+            teams = new List<TeamSaveData>()
+        };
+
+        for (int i = 0; i < pointsByTeam.Length; i++)
+        {
+            bool isPlayer = i == pointsByTeam.Length - 1;
+            season.teams.Add(new TeamSaveData
+            {
+                team_id = Guid.NewGuid().ToString(),
+                player_id = isPlayer ? TestPlayerId : Guid.NewGuid().ToString(),
+                team_name = isPlayer ? "PlayerTeam" : $"AiTeam{i + 1}",
+                is_player_team = isPlayer,
+                stats = new TeamStatsSaveData { points = pointsByTeam[i], wins = pointsByTeam[i] / 2 }
+            });
+        }
+        return season;
+    }
+
+    private static void Test_SeasonPlacement_TiesShareTheBetterPlacement(LocalSeasonBackend backend, ProgressionService progression)
+    {
+        int PlayerPlacement(params int[] points)
+        {
+            var season = BuildSeasonWithPoints(points);
+            return SeasonStandings.PlacementOf(season.teams, season.teams.First(t => t.is_player_team));
+        }
+
+        AssertEqual(1, PlayerPlacement(10, 6, 4, 10), "TiedStandings: tied with the leader for 1st shares 1st (the player row is stored last)");
+        AssertEqual(2, PlayerPlacement(10, 6, 6), "TiedStandings: tied for 2nd shares 2nd");
+        AssertEqual(2, PlayerPlacement(10, 6, 6, 6), "TiedStandings: a three-way tie for 2nd gives all three 2nd");
+        AssertEqual(3, PlayerPlacement(10, 8, 6, 6), "TiedStandings: tied for 3rd shares 3rd");
+        AssertEqual(4, PlayerPlacement(10, 8, 6, 4), "TiedStandings: a clear 4th is still 4th");
+        AssertEqual(3, PlayerPlacement(10, 8, 6, 6, 6), "TiedStandings: three teams tied for 3rd all get 3rd");
+        AssertEqual(0, SeasonStandings.PlacementOf(BuildSeasonWithPoints(10, 6).teams, new TeamSaveData()), "TiedStandings: a team that is not in the season has no placement");
+
+        // The order teams are stored in must not matter.
+        var ordered = BuildSeasonWithPoints(6, 10, 6, 6);
+        var player = ordered.teams.First(t => t.is_player_team);
+        int forward = SeasonStandings.PlacementOf(ordered.teams, player);
+        int reversed = SeasonStandings.PlacementOf(Enumerable.Reverse(ordered.teams).ToList(), player);
+        AssertEqual(2, forward, "TiedStandings: one team ahead of a three-way tie puts the tied teams 2nd");
+        AssertEqual(forward, reversed, "TiedStandings: reversing the stored order gives the same placement");
+
+        // The reward follows the shared placement: 1st/2nd/3rd are paid, 4th and below are not.
+        float seasonMultiplier = new FacilitiesService().GetProgressionXpMultiplier(TestPlayerId, "season_reward");
+        foreach (var (points, baseXp, label) in new[]
+                 {
+                     (new[] { 10, 6, 4, 10 }, 50, "tied for 1st"),
+                     (new[] { 10, 6, 6 }, 30, "tied for 2nd"),
+                     (new[] { 10, 8, 6, 6 }, 15, "tied for 3rd"),
+                     (new[] { 10, 8, 6, 4 }, 0, "clear 4th"),
+                 })
+        {
+            progression.ClearPlayerProgression(TestPlayerId);
+            backend.AwardSeasonRewards(BuildSeasonWithPoints(points), s => { }, e => { });
+            float xp = progression.GetState(TestPlayerId, createIfMissing: false)?.current_xp ?? 0f;
+            AssertEqual(baseXp * seasonMultiplier, xp, $"TiedStandings: {label} earns {baseXp} base XP", XpTolerance);
+        }
+    }
+
+    private static void Test_PlayerRank_MatchesTheRewardPlacement(ProgressionService progression)
+    {
+        var go = new GameObject("SeasonManager_TestHarness");
+        try
+        {
+            var manager = go.AddComponent<SeasonManager>();
+            ForceAwake(manager);
+            typeof(SeasonManager).GetField("progressionService", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(manager, progression);
+
+            var season = BuildSeasonWithPoints(10, 8, 6, 6);
+            typeof(SeasonManager).GetField("seasonData", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(manager, season);
+            AssertEqual(3, manager.PlayerRank, "PlayerRank: the hub shows the same shared placement that the reward uses (tied for 3rd)");
+            AssertEqual(SeasonStandings.PlacementOf(season.teams, season.teams.First(t => t.is_player_team)), manager.PlayerRank,
+                "PlayerRank: identical to SeasonStandings.PlacementOf");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(go);
+        }
     }
 
     private static void Test_CreateSeason_InitializesPlayerProgression(LocalSeasonBackend backend, ProgressionService progression)
