@@ -728,6 +728,11 @@ public static class ProgressionUnitTests
         ResetFacilitiesIntegrationState(progression, facilities, economy, FacilitiesTestPlayerId);
         ResetFacilitiesIntegrationState(progression, facilities, economy, FacilitiesTestPlayerId_NoFunds);
 
+        Test_TierGate_RookieCannotUpgradePastLevel2_ProUnlocksLevel3(progression, facilities, economy);
+
+        ResetFacilitiesIntegrationState(progression, facilities, economy, FacilitiesTestPlayerId);
+        ResetFacilitiesIntegrationState(progression, facilities, economy, FacilitiesTestPlayerId_NoFunds);
+
         Log($"===== RunFacilitiesIntegration: {_passed} passed, {_failed} failed =====");
         if (_failed > 0)
         {
@@ -838,6 +843,66 @@ public static class ProgressionUnitTests
 
         float multiplier = facilities.GetProgressionXpMultiplier(FacilitiesTestPlayerId_NoFunds, "match_win");
         AssertEqual(1.03f, multiplier, "InsufficientFunds: multiplier unchanged at baseline (level-1)");
+    }
+
+    // Tier gate (facilities_config.json "tier_upgrade_gates": rookie 2, pro 3, all_star 4,
+    // legend 5). FacilitiesService reads the tier straight from progression_state.json, so
+    // this drives the tier through the real ProgressionService (AddXp) rather than writing
+    // the file by hand - that is the Progression -> Facilities link the gate depends on.
+    private static void Test_TierGate_RookieCannotUpgradePastLevel2_ProUnlocksLevel3(
+        ProgressionService progression, FacilitiesService facilities, EconomyService economy)
+    {
+        const string facility = "film_room";
+        string gatePlayer = FacilitiesTestPlayerId;
+        economy.AddCurrency(gatePlayer, 10_000_000, 0, "integration_test_seed");
+
+        AssertEqual("rookie", progression.GetState(gatePlayer).current_tier, "TierGate: fresh player starts as rookie");
+        AssertEqual(2, facilities.GetMaxFacilityLevelForPlayerTier(gatePlayer), "TierGate: rookie max facility level is 2");
+
+        // Rookie: level 1 -> 2 is allowed.
+        bool toLevel2 = facilities.TryUpgradeFacility(gatePlayer, facility, out var level2State);
+        Assert(toLevel2, "TierGate: rookie can upgrade Film Room to level 2");
+        AssertEqual(2, level2State?.level ?? -1, "TierGate: Film Room is level 2");
+
+        // Rookie: level 2 -> 3 is refused, nothing is spent, nothing changes.
+        int coinsBefore = economy.GetWallet(gatePlayer, createIfMissing: false).coins;
+        bool canUpgrade = facilities.CanUpgradeFacility(gatePlayer, facility, out string blockReason);
+        Assert(!canUpgrade, "TierGate: CanUpgradeFacility reports a rookie blocked at level 3");
+        Assert(!string.IsNullOrEmpty(blockReason) && blockReason.Contains("Rookie"),
+            $"TierGate: block reason names the current tier (got '{blockReason}')");
+
+        bool toLevel3Rookie = facilities.TryUpgradeFacility(gatePlayer, facility, out var blockedState);
+        Assert(!toLevel3Rookie, "TierGate: rookie cannot upgrade Film Room past level 2");
+        AssertEqual(2, blockedState?.level ?? -1, "TierGate: refused upgrade leaves Film Room at level 2");
+        AssertEqual(coinsBefore, economy.GetWallet(gatePlayer, createIfMissing: false).coins,
+            "TierGate: refused upgrade spends no coins (gate is checked before payment)");
+
+        // The gate is per tier, not per room: Weight Room hits the same ceiling.
+        bool weightTo2 = facilities.TryUpgradeFacility(gatePlayer, "weight_room", out _);
+        bool weightTo3 = facilities.TryUpgradeFacility(gatePlayer, "weight_room", out var weightState);
+        Assert(weightTo2, "TierGate: rookie can upgrade Weight Room to level 2");
+        Assert(!weightTo3, "TierGate: rookie cannot upgrade Weight Room past level 2 either");
+        AssertEqual(2, weightState?.level ?? -1, "TierGate: Weight Room stays at level 2");
+
+        // 49 XP is still rookie - the gate must not open early.
+        progression.AddXp(gatePlayer, 49, "unit_test", Guid.NewGuid().ToString());
+        AssertEqual("rookie", progression.GetState(gatePlayer).current_tier, "TierGate: 49 XP is still rookie");
+        Assert(!facilities.TryUpgradeFacility(gatePlayer, facility, out _), "TierGate: 49 XP does not unlock level 3");
+
+        // 50 XP crosses into pro - level 3 opens.
+        progression.AddXp(gatePlayer, 1, "unit_test", Guid.NewGuid().ToString());
+        AssertEqual("pro", progression.GetState(gatePlayer).current_tier, "TierGate: 50 XP is pro");
+        AssertEqual(3, facilities.GetMaxFacilityLevelForPlayerTier(gatePlayer), "TierGate: pro max facility level is 3");
+        Assert(facilities.CanUpgradeFacility(gatePlayer, facility, out _), "TierGate: CanUpgradeFacility allows level 3 once pro");
+
+        bool toLevel3Pro = facilities.TryUpgradeFacility(gatePlayer, facility, out var level3State);
+        Assert(toLevel3Pro, "TierGate: pro can upgrade Film Room to level 3");
+        AssertEqual(3, level3State?.level ?? -1, "TierGate: Film Room is level 3");
+
+        // Pro is gated too: level 4 stays closed until all_star.
+        bool toLevel4Pro = facilities.TryUpgradeFacility(gatePlayer, facility, out var level4State);
+        Assert(!toLevel4Pro, "TierGate: pro cannot upgrade Film Room past level 3");
+        AssertEqual(3, level4State?.level ?? -1, "TierGate: Film Room stays at level 3 as pro");
     }
 
     // ---------------- CCAS integration ----------------
@@ -1085,6 +1150,292 @@ public static class ProgressionUnitTests
             "legendary" => dxp.legendary_duplicate_xp,
             _ => dxp.common_duplicate_xp
         };
+    }
+
+    // ---------------- Coaches integration ----------------
+
+    private const string CoachesTestPlayerId = "__integration_test_coaches__";
+    private const string CoachesTestPlayerId_NoFunds = "__integration_test_coaches_nofunds__";
+    private const string CoachesTestTeamId = "__integration_test_coaches_team__";
+
+    // Numbers pinned from coaches_bonus_config.json (as of PRs #91/#93): an Offensive or
+    // Defensive coach adds 0.03 + 0.0004 x overall rating on a win, and having both adds a
+    // 0.02 synergy bonus on a win only. The other tests derive expectations from the config
+    // file; this pin exists so an intentional rebalance shows up as a visible test change.
+    private const float PinnedCoachBaseBonus = 0.03f;
+    private const float PinnedCoachRatingMultiplier = 0.0004f;
+    private const float PinnedSynergyBonus = 0.02f;
+
+    /// <summary>
+    /// Integration test: Coaches -> Progression (per-coach and synergy XP bonuses, chained
+    /// on top of Facilities' multiplier) and Coaches -> Economy (hiring cost gating).
+    /// Exercises the real CoachesService/FacilitiesService/EconomyService/ProgressionService
+    /// together - no mocking - via Unity's command-line batch mode:
+    ///   Unity.exe -batchmode -projectPath &lt;path&gt; -executeMethod ProgressionUnitTests.RunCoachesIntegration -quit -logFile &lt;path&gt;
+    ///
+    /// Regression history: CoachesService.NormalizeXpSourceForCoachBonus() once mapped
+    /// "match_win"/"match_loss" to "offensive_drill"/"defensive_drill" while the config keys
+    /// its rules "win"/"loss", so hired O/D coaches silently added zero XP on matches
+    /// (fixed in PR #81). PR #93 then scoped the synergy bonus to "win" (it used to apply to
+    /// every non-duplicate source, including losses and training).
+    /// </summary>
+    public static void RunCoachesIntegration()
+    {
+        bool passed = RunCoachesSuite().Passed;
+        if (Application.isBatchMode)
+            EditorApplication.Exit(passed ? 0 : 1);
+    }
+
+    public static TestSuiteRunResult RunCoachesSuite()
+    {
+        _passed = 0;
+        _failed = 0;
+        _failures.Clear();
+
+        Log("===== ProgressionUnitTests.RunCoachesIntegration: starting =====");
+
+        var progression = GetOrCreateProgressionService();
+        var facilities = new FacilitiesService();
+        var economy = new EconomyService();
+
+        ResetCoachesIntegrationState(progression, facilities, economy, CoachesTestPlayerId);
+        ResetCoachesIntegrationState(progression, facilities, economy, CoachesTestPlayerId_NoFunds);
+
+        // The tests share state on purpose, in order: coaches hired by one are the
+        // starting point of the next (see the comment at the top of each).
+        Test_NoCoachesHired_NoBonusApplied(progression, facilities);
+        Test_HireOffensiveCoach_AppliesConfigDrivenBonusToMatchWin(progression, facilities, economy);
+        Test_HireBothOffenseAndDefense_SynergyBonusStacks(progression, facilities, economy);
+        Test_Synergy_AppliesToWinsOnly_NotLossesOrTraining(progression, facilities);
+        Test_DuplicateCardSource_ExemptFromCoachBonus(progression);
+        Test_FireCoach_RemovesItsBonus(progression, facilities);
+        Test_FacilityThenCoachBonus_IsNotRoundedBetweenSteps(progression, facilities);
+        Test_HireCoach_InsufficientFunds_Rejected();
+
+        ResetCoachesIntegrationState(progression, facilities, economy, CoachesTestPlayerId);
+        ResetCoachesIntegrationState(progression, facilities, economy, CoachesTestPlayerId_NoFunds);
+
+        Log($"===== RunCoachesIntegration: {_passed} passed, {_failed} failed =====");
+        if (_failed > 0)
+        {
+            Log("FAILURES:\n - " + string.Join("\n - ", _failures));
+        }
+
+        return new TestSuiteRunResult(_passed, _failed, _failures);
+    }
+
+    private static void ResetCoachesIntegrationState(
+        ProgressionService progression, FacilitiesService facilities, EconomyService economy, string playerId)
+    {
+        progression.ClearPlayerProgression(playerId);
+        facilities.ResetFacilityState(playerId);
+        economy.ResetWallet(playerId);
+        CoachesService.ResetPlayerCoachState(playerId);
+    }
+
+    private static void Test_NoCoachesHired_NoBonusApplied(ProgressionService progression, FacilitiesService facilities)
+    {
+        float bonus = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "match_win");
+        AssertEqual(0f, bonus, "NoCoachesHired: bonus percent is 0 with nobody hired");
+
+        // A fresh player's level-1 Film Room still applies its own baseline multiplier
+        // (see the Facilities suite) - this confirms Coaches contributes nothing on top
+        // of that when nobody's hired, not that XP is untouched by every system.
+        float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, "match_win");
+        float expectedXp = ExpectedBonusXp(100, facilityMultiplier, 0f);
+
+        progression.AddXp(CoachesTestPlayerId, 100, "match_win", Guid.NewGuid().ToString());
+        float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(expectedXp, actualXp, "NoCoachesHired: XP reflects only the Facilities multiplier", XpTolerance);
+    }
+
+    private static void Test_HireOffensiveCoach_AppliesConfigDrivenBonusToMatchWin(
+        ProgressionService progression, FacilitiesService facilities, EconomyService economy)
+    {
+        progression.ClearPlayerProgression(CoachesTestPlayerId);
+        CoachesService.ResetPlayerCoachState(CoachesTestPlayerId);
+        economy.AddCurrency(CoachesTestPlayerId, 10_000_000, 0, "integration_test_seed");
+
+        var coach = HireCoachOfType(CoachesTestPlayerId, "O");
+        Assert(coach != null, "HireOffensiveCoach: an Offensive coach was hired");
+        if (coach == null) return;
+
+        var config = LoadCoachBonusConfigForTest();
+        float expectedBonus = GetExpectedTypeBonus(config, "O", "win", coach);
+        Assert(expectedBonus > 0f, "HireOffensiveCoach: config declares a non-zero base_bonus for O/win (sanity check on the fix)");
+
+        float actualBonus = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "match_win");
+        AssertEqual(expectedBonus, actualBonus, "HireOffensiveCoach: GetCoachXpBonusPercent matches config-derived value");
+        AssertEqual(PinnedCoachBaseBonus + coach.overall_rating * PinnedCoachRatingMultiplier, actualBonus,
+            "HireOffensiveCoach: bonus is 0.03 + 0.0004 x overall rating (pinned config numbers)");
+
+        float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, "match_win");
+        float expectedXp = ExpectedBonusXp(100, facilityMultiplier, expectedBonus);
+
+        progression.AddXp(CoachesTestPlayerId, 100, "match_win", Guid.NewGuid().ToString());
+        float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(expectedXp, actualXp, "HireOffensiveCoach: AddXp chains Facilities then Coaches correctly", XpTolerance);
+    }
+
+    private static void Test_HireBothOffenseAndDefense_SynergyBonusStacks(
+        ProgressionService progression, FacilitiesService facilities, EconomyService economy)
+    {
+        progression.ClearPlayerProgression(CoachesTestPlayerId);
+        CoachesService.ResetPlayerCoachState(CoachesTestPlayerId);
+        economy.AddCurrency(CoachesTestPlayerId, 10_000_000, 0, "integration_test_seed");
+
+        var offCoach = HireCoachOfType(CoachesTestPlayerId, "O");
+        var defCoach = HireCoachOfType(CoachesTestPlayerId, "D");
+        Assert(offCoach != null && defCoach != null, "SynergyBonus: both an Offensive and a Defensive coach were hired");
+        if (offCoach == null || defCoach == null) return;
+
+        var config = LoadCoachBonusConfigForTest();
+        float offBonus = GetExpectedTypeBonus(config, "O", "win", offCoach);
+        float defBonus = GetExpectedTypeBonus(config, "D", "win", defCoach);
+        float synergyBonus = config?.synergy_bonus?
+            .FirstOrDefault(s => s != null && s.required != null && s.required.Contains("O") && s.required.Contains("D"))
+            ?.bonus ?? 0f;
+        Assert(synergyBonus > 0f, "SynergyBonus: config declares a non-zero O+D synergy bonus (sanity check)");
+        AssertEqual(PinnedSynergyBonus, synergyBonus, "SynergyBonus: config synergy bonus is the pinned 0.02");
+
+        float expectedTotal = offBonus + defBonus + synergyBonus;
+        float actualTotal = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "match_win");
+        AssertEqual(expectedTotal, actualTotal, "SynergyBonus: total bonus is both per-type bonuses plus synergy");
+
+        float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, "match_win");
+        float expectedXp = ExpectedBonusXp(100, facilityMultiplier, expectedTotal);
+
+        progression.AddXp(CoachesTestPlayerId, 100, "match_win", Guid.NewGuid().ToString());
+        float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(expectedXp, actualXp, "SynergyBonus: AddXp reflects the stacked per-type + synergy bonus", XpTolerance);
+    }
+
+    private static void Test_Synergy_AppliesToWinsOnly_NotLossesOrTraining(
+        ProgressionService progression, FacilitiesService facilities)
+    {
+        // O+D are still hired from the previous test. Before PR #93 the 0.02 synergy bonus
+        // applied to every non-duplicate source; the config now scopes it to "win", and the
+        // per-type rules only exist for "win" too, so losses and training get no coach bonus.
+        foreach (string source in new[] { "match_loss", "training" })
+        {
+            float bonus = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, source);
+            AssertEqual(0f, bonus, $"SynergyWinOnly: coach bonus on '{source}' is 0 with O+D hired");
+
+            progression.ClearPlayerProgression(CoachesTestPlayerId);
+            float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, source);
+            float expectedXp = ExpectedBonusXp(100, facilityMultiplier, 0f);
+
+            progression.AddXp(CoachesTestPlayerId, 100, source, Guid.NewGuid().ToString());
+            float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+            AssertEqual(expectedXp, actualXp, $"SynergyWinOnly: '{source}' XP reflects only Facilities, no coach bonus", XpTolerance);
+        }
+    }
+
+    private static void Test_DuplicateCardSource_ExemptFromCoachBonus(ProgressionService progression)
+    {
+        // O+D coaches are still hired - duplicate-card XP must be exempt from coach
+        // bonuses regardless, same exemption already proven for Facilities multipliers.
+        float bonus = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "duplicate_card_common");
+        AssertEqual(0f, bonus, "DuplicateCardSource: coach bonus percent is 0 despite hired coaches");
+
+        progression.ClearPlayerProgression(CoachesTestPlayerId);
+        progression.AddXp(CoachesTestPlayerId, 100, "duplicate_card_common", Guid.NewGuid().ToString());
+        float xp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(100f, xp, "DuplicateCardSource: 100 base XP stays 100, unaffected by hired coaches");
+    }
+
+    private static void Test_FireCoach_RemovesItsBonus(ProgressionService progression, FacilitiesService facilities)
+    {
+        // O+D are still hired (synergy active). Firing the Offensive coach should drop both
+        // its own per-type bonus AND the synergy bonus (which requires both types), leaving
+        // only D's.
+        bool fired = CoachesService.FireCoach("O", CoachesTestPlayerId);
+        Assert(fired, "FireCoach: firing the Offensive coach succeeds");
+
+        var config = LoadCoachBonusConfigForTest();
+        var defCoachId = CoachesService.GetTeamState(CoachesTestPlayerId)?.defence_coach;
+        var defCoach = string.IsNullOrEmpty(defCoachId) ? null : CoachesService.GetCoachById(defCoachId);
+        Assert(defCoach != null, "FireCoach: Defensive coach is still on the roster");
+        if (defCoach == null) return;
+
+        float expectedRemaining = GetExpectedTypeBonus(config, "D", "win", defCoach);
+        float actualRemaining = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "match_win");
+        AssertEqual(expectedRemaining, actualRemaining, "FireCoach: only the remaining Defensive coach's bonus applies (no synergy, no Offensive bonus)");
+
+        progression.ClearPlayerProgression(CoachesTestPlayerId);
+        float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, "match_win");
+        float expectedXp = ExpectedBonusXp(100, facilityMultiplier, expectedRemaining);
+
+        progression.AddXp(CoachesTestPlayerId, 100, "match_win", Guid.NewGuid().ToString());
+        float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(expectedXp, actualXp, "FireCoach: AddXp reflects the reduced bonus after firing", XpTolerance);
+    }
+
+    private static void Test_FacilityThenCoachBonus_IsNotRoundedBetweenSteps(ProgressionService progression, FacilitiesService facilities)
+    {
+        // A Defensive coach is still hired from the previous test. A small base amount makes
+        // rounding visible: 7 x 1.03 (Facilities) x (1 + coach bonus) is about 7.44, but
+        // rounding after the Facilities step and again after the Coaches step used to
+        // collapse it to 7.
+        progression.ClearPlayerProgression(CoachesTestPlayerId);
+        float coachBonus = CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId, "match_win");
+        float facilityMultiplier = facilities.GetProgressionXpMultiplier(CoachesTestPlayerId, "match_win");
+        float expectedXp = ExpectedBonusXp(7, facilityMultiplier, coachBonus);
+
+        Assert(coachBonus > 0f, "NoIntermediateRounding: a coach bonus is active for this check");
+        Assert(Mathf.Abs(expectedXp - Mathf.Round(expectedXp)) > 0.05f,
+            $"NoIntermediateRounding: test data actually produces a fractional result ({expectedXp}), so rounding would be visible");
+
+        progression.AddXp(CoachesTestPlayerId, 7, "match_win", Guid.NewGuid().ToString());
+        float actualXp = progression.GetState(CoachesTestPlayerId).current_xp;
+        AssertEqual(expectedXp, actualXp, "NoIntermediateRounding: XP keeps its fractional part through both bonus steps", XpTolerance);
+    }
+
+    private static void Test_HireCoach_InsufficientFunds_Rejected()
+    {
+        // Deliberately no AddCurrency call - this player has 0 coins.
+        var candidate = CoachesService.GetAvailableCoaches(CoachesTestPlayerId_NoFunds)
+            .FirstOrDefault(c => c != null && c.coach_type == "O");
+        Assert(candidate != null, "HireInsufficientFunds: an Offensive coach exists in the catalog");
+        if (candidate == null) return;
+
+        bool hired = CoachesService.TryHireCoach(CoachesTestTeamId, candidate.coach_id, out _, CoachesTestPlayerId_NoFunds);
+        Assert(!hired, "HireInsufficientFunds: TryHireCoach fails with 0 coins");
+        Assert(string.IsNullOrEmpty(CoachesService.GetTeamState(CoachesTestPlayerId_NoFunds)?.offence_coach),
+            "HireInsufficientFunds: no Offensive coach is assigned");
+        AssertEqual(0f, CoachesService.GetCoachXpBonusPercent(CoachesTestPlayerId_NoFunds, "match_win"),
+            "HireInsufficientFunds: no coach bonus is granted");
+    }
+
+    // Mirrors ProgressionService's bonus chain: Facilities multiplier, then the Coaches
+    // bonus on top, with no rounding at either step (the minimum-1 floor still applies).
+    private static float ExpectedBonusXp(float baseXp, float facilityMultiplier, float coachBonusPercent) =>
+        Mathf.Max(1f, Mathf.Max(1f, baseXp * facilityMultiplier) * (1f + coachBonusPercent));
+
+    private static CoachDatabaseRecord HireCoachOfType(string playerId, string coachType)
+    {
+        var candidate = CoachesService.GetAvailableCoaches(playerId).FirstOrDefault(c => c != null && c.coach_type == coachType);
+        if (candidate == null) return null;
+
+        bool hired = CoachesService.TryHireCoach(CoachesTestTeamId, candidate.coach_id, out var hiredCoach, playerId);
+        return hired ? hiredCoach : null;
+    }
+
+    // Reads coaches_bonus_config.json directly (the same file CoachesService itself reads)
+    // rather than calling its private LoadBonusConfig(), matching how the Facilities/CCAS
+    // suites compute expected values from real config rather than hardcoded literals.
+    private static CoachesBonusConfig LoadCoachBonusConfigForTest()
+    {
+        var path = Path.Combine(Application.streamingAssetsPath, "Coaches", "coaches_bonus_config.json");
+        return JsonUtility.FromJson<CoachesBonusConfig>(File.ReadAllText(path));
+    }
+
+    private static float GetExpectedTypeBonus(CoachesBonusConfig config, string coachType, string normalizedSource, CoachDatabaseRecord coach)
+    {
+        var typeEntry = config?.xp_bonus_rules?.FirstOrDefault(t => t != null && string.Equals(t.coach_type, coachType, StringComparison.OrdinalIgnoreCase));
+        var rule = typeEntry?.source_rules?.FirstOrDefault(r => r != null && string.Equals(r.xp_source, normalizedSource, StringComparison.OrdinalIgnoreCase));
+        if (rule == null || coach == null) return 0f;
+        return rule.base_bonus + coach.overall_rating * rule.rating_multiplier;
     }
 
     // Tolerance for comparing XP values: float math leaves noise (100 x 1.08f is 108.0000076).

@@ -98,7 +98,7 @@ public static class TestSuiteRunner
             {
                 Name = "progression-facilities",
                 Subsystem = "Facilities -> Progression and Economy",
-                Description = "Facility XP multipliers, upgrades, and insufficient-funds gating.",
+                Description = "Facility XP multipliers, upgrades, insufficient-funds gating, and the Progression-tier upgrade gate.",
                 Run = ProgressionUnitTests.RunFacilitiesSuite
             },
             new SuiteDefinition
@@ -107,6 +107,13 @@ public static class TestSuiteRunner
                 Subsystem = "CCAS -> Progression and Economy",
                 Description = "Pack purchase cost gating, duplicate-card XP, and event idempotency.",
                 Run = ProgressionUnitTests.RunCcasSuite
+            },
+            new SuiteDefinition
+            {
+                Name = "progression-coaches",
+                Subsystem = "Coaches -> Progression and Economy",
+                Description = "Per-coach and synergy XP bonuses on top of Facilities, win-only scoping, duplicate-card exemption, firing, and hire cost gating.",
+                Run = ProgressionUnitTests.RunCoachesSuite
             },
             new SuiteDefinition
             {
@@ -249,6 +256,7 @@ public static class TestSuiteRunner
         report.AppendLine("| `ProgressionUnitTests` | ProgressionService, LocalSeasonBackend, FacilitiesService | Automated Unity batch suite |");
         report.AppendLine("| `ProgressionUnitTests.RunFacilitiesIntegration` | FacilitiesService -> ProgressionService and EconomyService | Automated Unity batch suite |");
         report.AppendLine("| `ProgressionUnitTests.RunCcasIntegration` | CCASService -> ProgressionService and EconomyService | Automated Unity batch suite |");
+        report.AppendLine("| `ProgressionUnitTests.RunCoachesIntegration` | CoachesService -> ProgressionService and EconomyService | Automated Unity batch suite |");
         report.AppendLine("| `CCASUnitTests` | CCASService, EconomyService, ProgressionService, FacilitiesService, CoachesService, EventBus, catalog/config loaders | Automated Unity batch suite |");
         report.AppendLine("| `CCASProgressionIntegrationTests` | CCASService -> ProgressionService | Automated Unity integration suite |");
         report.AppendLine("| `CCASEconomyIntegrationTests` | CCASService -> EconomyService | Automated Unity integration suite |");
@@ -296,7 +304,7 @@ public static class TestSuiteRunner
         report.AppendLine("MGI_TESTS=ccas-economy Unity -batchmode -projectPath <path-to-MGI_Monorepo> -executeMethod TestSuiteRunner.RunSelected -quit -logFile <path-to-log>");
         report.AppendLine("```");
         report.AppendLine();
-        report.AppendLine("Available selections: `progression`, `progression-facilities`, `progression-ccas`, `ccas`, `ccas-progression`, `ccas-economy`, `ccas-boundary`, `ccas-scene-smoke`, `canonical-player-id`, or `all`.");
+        report.AppendLine("Available selections: `progression`, `progression-facilities`, `progression-ccas`, `progression-coaches`, `ccas`, `ccas-progression`, `ccas-economy`, `ccas-boundary`, `ccas-scene-smoke`, `canonical-player-id`, or `all`.");
 
         File.WriteAllText(reportPath, report.ToString());
     }
