@@ -16,7 +16,8 @@ def main(argv=None):
     ap.add_argument("--mode", choices=["results", "lump"], default="results",
                     help="results = coins from game results, lump = 1,200,000 at start")
     ap.add_argument("--model", choices=engine.MODELS, default=engine.MODEL_VERSION,
-                    help="0.3 = current coach model, 0.2 = legacy coach.json bonus for comparison")
+                    help="0.4 = 0.3 plus team growth (packs, coach hiring), 0.3 = current coach model, "
+                         "0.2 = legacy coach.json bonus for comparison")
     ap.add_argument("--out", default="out", help="output folder")
     ap.add_argument("--no-json", action="store_true", help="skip the JSON file (it gets large for big runs)")
     args = ap.parse_args(argv)

@@ -34,6 +34,23 @@ python3 -m gos --runs 100 --seasons 15 --no-json --model 0.2 --out out_v02
 python3 -m gos.report out_v03 --compare out_v02
 ```
 
+The default model is v0.4. It adds team growth to v0.3: each week the player
+buys the best pack they can afford (cards from `CCAS/phase2_config.json` go into
+the roster, duplicates pay XP), hires a better coach when affordable (salary x
+1,000,000 / 52, half refunded for the coach it replaces), and spends what is left
+on Facilities. To compare with v0.3:
+
+```bash
+python3 -m gos --runs 100 --seasons 15 --no-json --out out_v04
+python3 -m gos --runs 100 --seasons 15 --no-json --model 0.3 --out out_v03
+python3 -m gos.report out_v04 --compare out_v03
+```
+
+The PR #94 XP rules (2 training XP a week, tied teams share the better
+placement for season rewards, XP amounts read from `progression.json`) apply to
+every model, so 0.2 and 0.3 output from before v0.4 will not match a rerun with
+the same seed.
+
 Same seed and config always give the same output. Each output folder gets a
 `run_info.json` with the seed, model version and schema version, and the report
 prints them at the top.
@@ -46,14 +63,12 @@ or call any Unity code.
 | System | What the simulator uses | Status |
 | --- | --- | --- |
 | Coaches | `Coaches/coaches_schema_data.json` (499 coaches) for coach ratings and strength bonus, `CoachData.cs` and `CoachesService.cs` rules | Read live through `gos/config_loader.py` |
-| CCAS | `CCAS/cards_catalog.json` card tiers 1 to 5 for team rosters | Loader reads it, engine still uses copied values |
-| Progression | `Progression/progression.json` XP rewards and tiers, XP order from `ProgressionService.ApplyXpBonuses` | Loader reads it, engine still uses copied values |
-| Facilities | `Facilities/facilities_config.json` costs, XP effects and tier gates | Loader reads it, engine still uses copied values |
+| CCAS | `CCAS/cards_catalog.json` cards and `CCAS/phase2_config.json` packs, drop rates, duplicate XP | Read live (v0.4) |
+| Progression | `Progression/progression.json` XP rewards and tiers, XP order from `ProgressionService.ApplyXpBonuses` | Read live |
+| Facilities | `Facilities/facilities_config.json` costs, XP effects and tier gates | Read live |
 
-All files are under `Assets/StreamingAssets/`. "Copied values" are constants at
-the top of `gos/engine.py` that match `main` today. Moving them onto the loader
-is the next step, so a change in the game's JSON shows up in the simulator
-automatically.
+All files are under `Assets/StreamingAssets/`, so a change in the game's JSON
+shows up in the simulator on the next run.
 
 **Back into Unity (not connected yet).** Progression's `LocalSeasonBackend` can
 already read simulator results week by week through `GameOutcomeReader`
