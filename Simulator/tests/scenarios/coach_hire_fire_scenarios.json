@@ -1,0 +1,1023 @@
+{
+  "format": "coach_hire_fire_scenarios",
+  "schema_version": 2,
+  "purpose": "Shared hire/fire test cases for CoachesService (Unity) and any port. Same file, same expected results.",
+  "constants": {
+    "hire_cost_formula": "round(salary x 1,000,000 / 52)",
+    "refund_rate": 0.5,
+    "team_rating_baseline": 12,
+    "team_rating_normalization": 1,
+    "hire_source": "coach_hiring",
+    "fire_refund_source": "coach_firing_refund"
+  },
+  "notes": [
+    "Each scenario starts from input (coins and coaches_start) and applies steps in order. After every step, expected gives the result, wallet, the three coach slots, Team Rating and the events published by that step.",
+    "Actions: hire (by coach_name; coach_id is the catalog id), fire (by role), set_games_served (test setup: sets games_served on the contract of the role, because the game does not increment it yet).",
+    "A failed action (success false) changes nothing and publishes nothing. wallet_change is null when no coins move.",
+    "Roles are O, D and ST. Event payloads use coach_type O, D and S (Special Teams is normalised to S by CoachesService).",
+    "Team Rating = team_rating_baseline + sum of bonus_pct of the hired coaches, divided by team_rating_normalization. bonus_pct = round(average of the coach's 4 role stats x 5), taken from the coaches block.",
+    "Wallet is coins only. Every list is explicit with named fields; no reader should rely on JSON key order.",
+    "Expected values are calculated from the rules in CoachesService.cs, not copied from running the game."
+  ],
+  "coaches": [
+    {
+      "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+      "coach_name": "Aldo Donelli",
+      "role": "O",
+      "salary": 1,
+      "contract_length": 1,
+      "overall_rating": 1.0,
+      "bonus_pct": 5,
+      "hire_cost": 19231
+    },
+    {
+      "coach_id": "c2d74992-67b8-4497-82f0-5bf93ed20b4a",
+      "coach_name": "Ed Khayat",
+      "role": "D",
+      "salary": 1,
+      "contract_length": 1,
+      "overall_rating": 1.0,
+      "bonus_pct": 5,
+      "hire_cost": 19231
+    },
+    {
+      "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+      "coach_name": "Aaron Kromer",
+      "role": "ST",
+      "salary": 1,
+      "contract_length": 1,
+      "overall_rating": 1.0,
+      "bonus_pct": 5,
+      "hire_cost": 19231
+    },
+    {
+      "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+      "coach_name": "Don Shula",
+      "role": "O",
+      "salary": 15,
+      "contract_length": 10,
+      "overall_rating": 6.0,
+      "bonus_pct": 30,
+      "hire_cost": 288462
+    },
+    {
+      "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+      "coach_name": "Bill Belichick",
+      "role": "D",
+      "salary": 15,
+      "contract_length": 8,
+      "overall_rating": 6.0,
+      "bonus_pct": 30,
+      "hire_cost": 288462
+    },
+    {
+      "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+      "coach_name": "John Harbaugh",
+      "role": "ST",
+      "salary": 9,
+      "contract_length": 6,
+      "overall_rating": 5.25,
+      "bonus_pct": 26,
+      "hire_cost": 173077
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "S5a",
+      "schema_version": 2,
+      "name": "Hire three coaches from an empty team",
+      "description": "1,000,000 coins, no coaches. Each hire costs round(salary x 1,000,000 / 52), raises Team Rating by the coach bonus, and publishes hire_coach.",
+      "input": {
+        "team_id": "scenario_team",
+        "coins_start": 1000000,
+        "coaches_start": [
+          {
+            "role": "O",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "D",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "ST",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          }
+        ],
+        "team_rating_start": 12
+      },
+      "steps": [
+        {
+          "step": 1,
+          "action": "hire",
+          "coach_name": "Don Shula",
+          "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+          "comment": "Offense, salary 15",
+          "expected": {
+            "success": true,
+            "coins": 711538,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -288462
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                "coach_name": "Don Shula",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 42,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                  "coach_type": "O",
+                  "cost_paid_coins": 288462
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "action": "hire",
+          "coach_name": "Bill Belichick",
+          "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+          "comment": "Defense, salary 15",
+          "expected": {
+            "success": true,
+            "coins": 423076,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -288462
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                "coach_name": "Don Shula",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+                "coach_name": "Bill Belichick",
+                "games_served": 0
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 72,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+                  "coach_type": "D",
+                  "cost_paid_coins": 288462
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "action": "hire",
+          "coach_name": "John Harbaugh",
+          "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+          "comment": "Special Teams, salary 9; event coach_type is S",
+          "expected": {
+            "success": true,
+            "coins": 249999,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -173077
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                "coach_name": "Don Shula",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+                "coach_name": "Bill Belichick",
+                "games_served": 0
+              },
+              {
+                "role": "ST",
+                "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+                "coach_name": "John Harbaugh",
+                "games_served": 0
+              }
+            ],
+            "team_rating": 98,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+                  "coach_type": "S",
+                  "cost_paid_coins": 173077
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "S5b",
+      "schema_version": 2,
+      "name": "Fire: refund by games served",
+      "description": "Refund = round(hire cost x 0.5 x (1 - games served / contract length)), games served clamped to 0..contract length. Zero games, partial, and full contract.",
+      "input": {
+        "team_id": "scenario_team",
+        "coins_start": 100000,
+        "coaches_start": [
+          {
+            "role": "O",
+            "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+            "coach_name": "Don Shula",
+            "games_served": 0
+          },
+          {
+            "role": "D",
+            "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+            "coach_name": "Bill Belichick",
+            "games_served": 2
+          },
+          {
+            "role": "ST",
+            "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+            "coach_name": "John Harbaugh",
+            "games_served": 6
+          }
+        ],
+        "team_rating_start": 98
+      },
+      "steps": [
+        {
+          "step": 1,
+          "action": "fire",
+          "role": "O",
+          "comment": "0 of 10 games: refund is half the hire cost",
+          "expected": {
+            "success": true,
+            "coins": 244231,
+            "wallet_change": {
+              "source": "coach_firing_refund",
+              "coins_delta": 144231
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+                "coach_name": "Bill Belichick",
+                "games_served": 2
+              },
+              {
+                "role": "ST",
+                "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+                "coach_name": "John Harbaugh",
+                "games_served": 6
+              }
+            ],
+            "team_rating": 68,
+            "events": [
+              {
+                "event_type": "fire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                  "coach_type": "O",
+                  "refund_amount_coins": 144231
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "action": "fire",
+          "role": "D",
+          "comment": "2 of 8 games: refund x 0.75",
+          "expected": {
+            "success": true,
+            "coins": 352404,
+            "wallet_change": {
+              "source": "coach_firing_refund",
+              "coins_delta": 108173
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+                "coach_name": "John Harbaugh",
+                "games_served": 6
+              }
+            ],
+            "team_rating": 38,
+            "events": [
+              {
+                "event_type": "fire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "90cd3f49-9863-4cd8-b89f-1ced8a82ec08",
+                  "coach_type": "D",
+                  "refund_amount_coins": 108173
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "action": "fire",
+          "role": "ST",
+          "comment": "6 of 6 games: refund 0, no wallet change, fire_coach still published with 0",
+          "expected": {
+            "success": true,
+            "coins": 352404,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": [
+              {
+                "event_type": "fire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "c8a1b981-9ca5-4bcb-80b6-45a40171b4ad",
+                  "coach_type": "S",
+                  "refund_amount_coins": 0
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "note": "games_served is not incremented by the game yet (wired after the MGI AI merge). These scenarios set it directly."
+    },
+    {
+      "scenario_id": "S5c",
+      "schema_version": 2,
+      "name": "Hire and fire that must change nothing",
+      "description": "Insufficient funds, unknown coach, firing an empty slot, and re-hiring the coach already in the slot. Failed or repeated actions leave wallet and state unchanged and publish no event.",
+      "input": {
+        "team_id": "scenario_team",
+        "coins_start": 100000,
+        "coaches_start": [
+          {
+            "role": "O",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "D",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "ST",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          }
+        ],
+        "team_rating_start": 12
+      },
+      "steps": [
+        {
+          "step": 1,
+          "action": "hire",
+          "coach_name": "Don Shula",
+          "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+          "comment": "288,462 coins needed, only 100,000: fails",
+          "expected": {
+            "success": false,
+            "coins": 100000,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": []
+          }
+        },
+        {
+          "step": 2,
+          "action": "hire",
+          "coach_name": null,
+          "coach_id": null,
+          "comment": "not in the catalog: fails",
+          "expected": {
+            "success": false,
+            "coins": 100000,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": []
+          }
+        },
+        {
+          "step": 3,
+          "action": "fire",
+          "role": "O",
+          "comment": "no Offense coach: fails",
+          "expected": {
+            "success": false,
+            "coins": 100000,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": []
+          }
+        },
+        {
+          "step": 4,
+          "action": "hire",
+          "coach_name": "Aldo Donelli",
+          "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+          "comment": "19,231 coins: succeeds",
+          "expected": {
+            "success": true,
+            "coins": 80769,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -19231
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+                "coach_name": "Aldo Donelli",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 17,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+                  "coach_type": "O",
+                  "cost_paid_coins": 19231
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 5,
+          "action": "hire",
+          "coach_name": "Aldo Donelli",
+          "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+          "comment": "already in the slot: succeeds, no charge, no event",
+          "expected": {
+            "success": true,
+            "coins": 80769,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+                "coach_name": "Aldo Donelli",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 17,
+            "events": []
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "S5d",
+      "schema_version": 2,
+      "name": "Hire into an occupied slot",
+      "description": "Hiring a different coach into a filled slot replaces the coach and the contract. Current behavior: the full new cost is charged, the old coach gets no refund, and no fire_coach event is published.",
+      "input": {
+        "team_id": "scenario_team",
+        "coins_start": 1000000,
+        "coaches_start": [
+          {
+            "role": "O",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "D",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "ST",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          }
+        ],
+        "team_rating_start": 12
+      },
+      "steps": [
+        {
+          "step": 1,
+          "action": "hire",
+          "coach_name": "Aldo Donelli",
+          "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+          "comment": "Offense, salary 1",
+          "expected": {
+            "success": true,
+            "coins": 980769,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -19231
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+                "coach_name": "Aldo Donelli",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 17,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "9ed232ed-07b8-493c-8164-4a64dbcad563",
+                  "coach_type": "O",
+                  "cost_paid_coins": 19231
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "action": "hire",
+          "coach_name": "Don Shula",
+          "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+          "comment": "replaces Donelli in the Offense slot",
+          "expected": {
+            "success": true,
+            "coins": 692307,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -288462
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                "coach_name": "Don Shula",
+                "games_served": 0
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 42,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "6e97dd44-37e0-44b0-b5b3-3ba0370fa49d",
+                  "coach_type": "O",
+                  "cost_paid_coins": 288462
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "note": "Confirm with the Coaches owner that replacing without a refund is intended before relying on it."
+    },
+    {
+      "scenario_id": "S5e",
+      "schema_version": 2,
+      "name": "Refund rounding and clamping",
+      "description": "Ed Khayat: salary 1, contract length 1. Zero games gives 19,231 x 0.5 = 9,615.5, which rounds half to even (9,616). Aaron Kromer with games served above the contract length clamps to full, refund 0.",
+      "input": {
+        "team_id": "scenario_team",
+        "coins_start": 100000,
+        "coaches_start": [
+          {
+            "role": "O",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "D",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          },
+          {
+            "role": "ST",
+            "coach_id": null,
+            "coach_name": null,
+            "games_served": null
+          }
+        ],
+        "team_rating_start": 12
+      },
+      "steps": [
+        {
+          "step": 1,
+          "action": "hire",
+          "coach_name": "Ed Khayat",
+          "coach_id": "c2d74992-67b8-4497-82f0-5bf93ed20b4a",
+          "comment": "Defense, hire cost 19,231",
+          "expected": {
+            "success": true,
+            "coins": 80769,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -19231
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": "c2d74992-67b8-4497-82f0-5bf93ed20b4a",
+                "coach_name": "Ed Khayat",
+                "games_served": 0
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 17,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "c2d74992-67b8-4497-82f0-5bf93ed20b4a",
+                  "coach_type": "D",
+                  "cost_paid_coins": 19231
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 2,
+          "action": "fire",
+          "role": "D",
+          "comment": "refund 9,615.5 rounds to 9,616 (half to even)",
+          "expected": {
+            "success": true,
+            "coins": 90385,
+            "wallet_change": {
+              "source": "coach_firing_refund",
+              "coins_delta": 9616
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": [
+              {
+                "event_type": "fire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "c2d74992-67b8-4497-82f0-5bf93ed20b4a",
+                  "coach_type": "D",
+                  "refund_amount_coins": 9616
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "action": "hire",
+          "coach_name": "Aaron Kromer",
+          "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+          "comment": "Special Teams, hire cost 19,231",
+          "expected": {
+            "success": true,
+            "coins": 71154,
+            "wallet_change": {
+              "source": "coach_hiring",
+              "coins_delta": -19231
+            },
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+                "coach_name": "Aaron Kromer",
+                "games_served": 0
+              }
+            ],
+            "team_rating": 17,
+            "events": [
+              {
+                "event_type": "hire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+                  "coach_type": "S",
+                  "cost_paid_coins": 19231
+                }
+              }
+            ]
+          }
+        },
+        {
+          "step": 4,
+          "action": "set_games_served",
+          "role": "ST",
+          "games_served": 5,
+          "comment": "games served above contract length 1",
+          "expected": {
+            "success": true,
+            "coins": 71154,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+                "coach_name": "Aaron Kromer",
+                "games_served": 5
+              }
+            ],
+            "team_rating": 17,
+            "events": []
+          }
+        },
+        {
+          "step": 5,
+          "action": "fire",
+          "role": "ST",
+          "comment": "clamped to 1 of 1: refund 0",
+          "expected": {
+            "success": true,
+            "coins": 71154,
+            "wallet_change": null,
+            "coaches": [
+              {
+                "role": "O",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "D",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              },
+              {
+                "role": "ST",
+                "coach_id": null,
+                "coach_name": null,
+                "games_served": null
+              }
+            ],
+            "team_rating": 12,
+            "events": [
+              {
+                "event_type": "fire_coach",
+                "payload": {
+                  "team_id": "scenario_team",
+                  "coach_id": "be6519b4-762c-49e8-a2f7-9b0fdddb50f6",
+                  "coach_type": "S",
+                  "refund_amount_coins": 0
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "note": "Mathf.RoundToInt rounds half to even, like Python round()."
+    }
+  ]
+}

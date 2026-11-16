@@ -1,0 +1,462 @@
+{
+  "format": "cross_system_xp_scenarios",
+  "schema_version": 2,
+  "purpose": "CCAS policy boundary: duplicate-card XP stays at 1.0x even when Facilities and Coaches are upgraded. Shared by the Python tests and the C# tests.",
+  "constants": {
+    "duplicate_xp_config": "Assets/StreamingAssets/CCAS/phase2_config.json (duplicate_xp)",
+    "match_win_base_xp": 15,
+    "tolerance_xp": 0.001
+  },
+  "notes": [
+    "Each row in xp_by_source is one XP source: the base amount, the Facilities multiplier, the Coaches XP bonus (a fraction, 0.0848 = +8.48%) and the final XP.",
+    "final_xp = base_xp x facility_multiplier x (1 + coach_bonus). For every duplicate_card source the multiplier is 1.0 and the bonus is 0, so final_xp = base_xp.",
+    "The match_win row is a control that proves the upgrades are active in the same scenario.",
+    "Only Film Room is varied (as in the existing C# boundary test). Weight Room and Rehab Center stay at level 0.",
+    "Source names follow Progression: duplicate_card_<rarity> and match_win.",
+    "Expected values are calculated from the written rules, not copied from running the game."
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "X1a",
+      "schema_version": 2,
+      "name": "Baseline: no upgrades, no coaches",
+      "description": "Duplicate-card XP is the configured amount per rarity. The match_win row is the control: no bonus applies.",
+      "input": {
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "xp_by_source": [
+          {
+            "source": "duplicate_card_common",
+            "base_xp": 5,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 5.0
+          },
+          {
+            "source": "duplicate_card_uncommon",
+            "base_xp": 10,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 10.0
+          },
+          {
+            "source": "duplicate_card_rare",
+            "base_xp": 25,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 25.0
+          },
+          {
+            "source": "duplicate_card_epic",
+            "base_xp": 50,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 50.0
+          },
+          {
+            "source": "duplicate_card_legendary",
+            "base_xp": 100,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 100.0
+          },
+          {
+            "source": "match_win",
+            "base_xp": 15,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 15.0
+          }
+        ]
+      }
+    },
+    {
+      "scenario_id": "X1b",
+      "schema_version": 2,
+      "name": "Facilities upgraded only",
+      "description": "Film Room level 3. Match win XP is multiplied by 1.14. Duplicate-card XP is unchanged.",
+      "input": {
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "D",
+            "coach_name": null,
+            "stats": []
+          },
+          {
+            "role": "ST",
+            "coach_name": null,
+            "stats": []
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 3
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "xp_by_source": [
+          {
+            "source": "duplicate_card_common",
+            "base_xp": 5,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 5.0
+          },
+          {
+            "source": "duplicate_card_uncommon",
+            "base_xp": 10,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 10.0
+          },
+          {
+            "source": "duplicate_card_rare",
+            "base_xp": 25,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 25.0
+          },
+          {
+            "source": "duplicate_card_epic",
+            "base_xp": 50,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 50.0
+          },
+          {
+            "source": "duplicate_card_legendary",
+            "base_xp": 100,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 100.0
+          },
+          {
+            "source": "match_win",
+            "base_xp": 15,
+            "facility_multiplier": 1.14,
+            "coach_bonus": 0.0,
+            "final_xp": 17.1
+          }
+        ]
+      }
+    },
+    {
+      "scenario_id": "X1c",
+      "schema_version": 2,
+      "name": "Coaches hired only",
+      "description": "Highest-bonus coaches in all three roles. Match win XP gets the coach bonus (0.0848). Duplicate-card XP is unchanged.",
+      "input": {
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Don Shula",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 6
+              },
+              {
+                "stat": "rush",
+                "value": 6
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 6
+              },
+              {
+                "stat": "play_variation",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": "Bill Belichick",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 6
+              },
+              {
+                "stat": "pressure_control",
+                "value": 6
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 6
+              },
+              {
+                "stat": "turnover",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": "John Harbaugh",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 5
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 5
+              },
+              {
+                "stat": "return_speed",
+                "value": 5
+              },
+              {
+                "stat": "return_coverage",
+                "value": 6
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 0
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "xp_by_source": [
+          {
+            "source": "duplicate_card_common",
+            "base_xp": 5,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 5.0
+          },
+          {
+            "source": "duplicate_card_uncommon",
+            "base_xp": 10,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 10.0
+          },
+          {
+            "source": "duplicate_card_rare",
+            "base_xp": 25,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 25.0
+          },
+          {
+            "source": "duplicate_card_epic",
+            "base_xp": 50,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 50.0
+          },
+          {
+            "source": "duplicate_card_legendary",
+            "base_xp": 100,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 100.0
+          },
+          {
+            "source": "match_win",
+            "base_xp": 15,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0848,
+            "final_xp": 16.272
+          }
+        ]
+      }
+    },
+    {
+      "scenario_id": "X1d",
+      "schema_version": 2,
+      "name": "Facilities and Coaches both upgraded",
+      "description": "Film Room level 3 and the three max coaches. Match win XP gets both (facility first, then coach). Duplicate-card XP stays at the CCAS amount.",
+      "input": {
+        "coaches": [
+          {
+            "role": "O",
+            "coach_name": "Don Shula",
+            "stats": [
+              {
+                "stat": "passing_efficiency",
+                "value": 6
+              },
+              {
+                "stat": "rush",
+                "value": 6
+              },
+              {
+                "stat": "red_zone_conversion",
+                "value": 6
+              },
+              {
+                "stat": "play_variation",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "D",
+            "coach_name": "Bill Belichick",
+            "stats": [
+              {
+                "stat": "run_defence",
+                "value": 6
+              },
+              {
+                "stat": "pressure_control",
+                "value": 6
+              },
+              {
+                "stat": "coverage_discipline",
+                "value": 6
+              },
+              {
+                "stat": "turnover",
+                "value": 6
+              }
+            ]
+          },
+          {
+            "role": "ST",
+            "coach_name": "John Harbaugh",
+            "stats": [
+              {
+                "stat": "field_goal_accuracy",
+                "value": 5
+              },
+              {
+                "stat": "kickoff_instance",
+                "value": 5
+              },
+              {
+                "stat": "return_speed",
+                "value": 5
+              },
+              {
+                "stat": "return_coverage",
+                "value": 6
+              }
+            ]
+          }
+        ],
+        "facilities": [
+          {
+            "facility": "weight_room",
+            "level": 0
+          },
+          {
+            "facility": "film_room",
+            "level": 3
+          },
+          {
+            "facility": "rehab_center",
+            "level": 0
+          }
+        ]
+      },
+      "expected": {
+        "xp_by_source": [
+          {
+            "source": "duplicate_card_common",
+            "base_xp": 5,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 5.0
+          },
+          {
+            "source": "duplicate_card_uncommon",
+            "base_xp": 10,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 10.0
+          },
+          {
+            "source": "duplicate_card_rare",
+            "base_xp": 25,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 25.0
+          },
+          {
+            "source": "duplicate_card_epic",
+            "base_xp": 50,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 50.0
+          },
+          {
+            "source": "duplicate_card_legendary",
+            "base_xp": 100,
+            "facility_multiplier": 1.0,
+            "coach_bonus": 0.0,
+            "final_xp": 100.0
+          },
+          {
+            "source": "match_win",
+            "base_xp": 15,
+            "facility_multiplier": 1.14,
+            "coach_bonus": 0.0848,
+            "final_xp": 18.5501
+          }
+        ]
+      }
+    }
+  ]
+}
