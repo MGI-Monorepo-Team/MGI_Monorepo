@@ -29,13 +29,8 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
     private string _currentSeasonPath;
     private string _currentPlayerId;
 
-    // XP Reward Rules
-    private static readonly int XP_MATCH_PLAYED = 5;
-    private static readonly int XP_WIN = 10;
-    private static readonly int XP_LOSS = 2;
-    private static readonly int XP_1ST_PLACE = 50;
-    private static readonly int XP_2ND_PLACE = 30;
-    private static readonly int XP_3RD_PLACE = 15;
+    // XP amounts (match, weekly training, season placement) are not constants here: they
+    // come from progression.json via ProgressionService.GetXpRewardRules().
 
     private void Awake()
     {
@@ -114,7 +109,7 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             var playerTeam = new TeamSaveData
             {
                 team_id = Guid.NewGuid().ToString(),
-                player_id = "local_player",
+                player_id = PlayerIdProvider.Get(),
                 team_name = playerTeamName,
                 rating = 1000,
                 is_player_team = true,
@@ -139,9 +134,11 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
             // Save season data
             SaveSeasonData(seasonData);
 
-            // Fresh progression for this season's player (history scoped to player_id)
+            // XP is career XP: a new season keeps the player's existing XP, tier and history
+            // (it used to be cleared here). GetState only creates a zeroed state for a player
+            // who has none yet. Season-specific grants carry the season id in their event id,
+            // so a new season never collides with an earlier one's idempotency keys.
             _currentPlayerId = playerTeam.player_id;
-            EnsureProgressionService()?.ClearPlayerProgression(_currentPlayerId);
             EnsureProgressionService()?.GetState(_currentPlayerId, createIfMissing: true);
             Debug.Log($"[LocalSeasonBackend] Season created: {seasonData.season_id} with {seasonData.teams.Count} teams (player: {playerTeam.player_id})");
             onSuccess?.Invoke(seasonData);
@@ -204,7 +201,7 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 }
             }
 
-            // Award match XP: played (5) + win bonus (+10) or loss bonus (+2)
+            // Award this week's XP: the match, then the weekly training beat (same tick).
             if (playerTeam != null)
             {
                 if (string.IsNullOrEmpty(playerTeam.player_id))
@@ -214,11 +211,21 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 else
                 {
                     AwardMatchXp(playerTeam.player_id, currentSeason.season_id, currentSeason.current_week, playerWonThisWeek);
+                    AwardTrainingXp(playerTeam.player_id, currentSeason.season_id, currentSeason.current_week);
                 }
             }
             else
             {
                 Debug.LogWarning("[LocalSeasonBackend] No player team found in season");
+            }
+
+            // The final week closes the season: pay out the placement reward. The guard at the
+            // top of this method means the final week is only ever simulated once per season.
+            if (currentSeason.current_week >= currentSeason.total_weeks)
+            {
+                AwardSeasonRewards(currentSeason,
+                    message => Debug.Log($"[LocalSeasonBackend] Season complete: {message}"),
+                    error => Debug.LogError($"[LocalSeasonBackend] Season reward failed: {error}"));
             }
 
             // Save updated season
@@ -312,8 +319,10 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
     }
 
     /// <summary>
-    /// Awards season-end XP rewards based on final standings
-    /// Provides bonus XP for 1st (50), 2nd (30), 3rd (15) place finishes
+    /// Awards season-end XP based on final standings: 1st, 2nd and 3rd place are rewarded
+    /// (amounts from progression.json), nothing below 3rd. Called when the final week is
+    /// simulated. The grant id is derived from the season, so calling this twice for the same
+    /// season cannot pay out twice.
     /// </summary>
     public void AwardSeasonRewards(SeasonSaveData seasonData, Action<string> onSuccess, Action<string> onError = null)
     {
@@ -324,43 +333,24 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 throw new ArgumentException("Invalid season data");
             }
 
-            // Sort teams by points (ranking)
-            var rankedTeams = seasonData.teams
-                .Where(t => t != null && t.is_player_team)
-                .OrderByDescending(t => t.stats.points)
-                .ToList();
+            var progression = EnsureProgressionService();
+            var rules = progression?.GetXpRewardRules();
+            if (rules == null)
+            {
+                throw new InvalidOperationException("XP reward rules are unavailable (progression.json), so no season reward can be awarded");
+            }
 
-            if (rankedTeams.Count == 0)
+            var playerTeam = seasonData.teams.FirstOrDefault(t => t != null && t.is_player_team);
+            if (playerTeam == null)
             {
                 throw new Exception("No player team found in season data");
             }
 
-            var playerTeam = rankedTeams.First();
-            int placement = 1;
-            int xpReward = 0;
-
-            // Determine placement and reward
-            // This is simplified - in a real scenario, you'd rank all teams
-            var allTeamsByPoints = seasonData.teams
-                .Where(t => t != null && t.stats != null)
-                .OrderByDescending(t => t.stats.points)
-                .ToList();
-
-            placement = allTeamsByPoints.FindIndex(t => t.is_player_team) + 1;
-
-            if (placement == 1)
-            {
-                xpReward = XP_1ST_PLACE;
-            }
-            else if (placement == 2)
-            {
-                xpReward = XP_2ND_PLACE;
-            }
-            else if (placement == 3)
-            {
-                xpReward = XP_3RD_PLACE;
-            }
-            else
+            // Same ranking the hub displays. Teams tied on points and wins share the better
+            // placement, so a tie is never decided by the order teams are stored in.
+            int placement = SeasonStandings.PlacementOf(seasonData.teams, playerTeam);
+            int xpReward = rules.SeasonRewardForPlacement(placement);
+            if (xpReward <= 0)
             {
                 // No reward for 4th place or lower
                 Debug.Log($"[LocalSeasonBackend] Player team finished {placement}th - no season reward");
@@ -368,12 +358,12 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
                 return;
             }
 
-            // Award the XP
-            _progressionService?.AddXp(
+            // Award the XP (one grant per season: the id repeats if this is called again)
+            progression.AddXp(
                 playerTeam.player_id,
                 xpReward,
                 "season_reward",
-                Guid.NewGuid().ToString());
+                $"{seasonData.season_id}:season_reward");
             SaveProgressionDataToJson(playerTeam.player_id);
             Debug.Log($"[LocalSeasonBackend] Season reward awarded: {xpReward} XP for {placement} place finish");
             onSuccess?.Invoke($"Awarded {xpReward} XP for {placement} place finish");
@@ -390,18 +380,34 @@ public class LocalSeasonBackend : MonoBehaviour, ISeasonBackend
     #region Helper Methods
 
     /// <summary>
-    /// Single grant per match: 5 XP played + win (+10) or loss (+2) bonus.
+    /// Single grant per match: the played amount plus the win or loss bonus, all from
+    /// progression.json (xp_reward_rules).
     /// </summary>
     private void AwardMatchXp(string playerId, string seasonId, int week, bool playerWon)
     {
         var progression = EnsureProgressionService();
-        if (progression == null) return;
+        var rules = progression?.GetXpRewardRules();
+        if (rules == null) return;
 
-        int totalXp = XP_MATCH_PLAYED + (playerWon ? XP_WIN : XP_LOSS);
+        int totalXp = rules.MatchXp(playerWon);
         string source = playerWon ? "match_win" : "match_loss";
         string eventId = $"{seasonId}:week:{week}:match";
 
         progression.AddXp(playerId, totalXp, source, eventId);
+    }
+
+    /// <summary>
+    /// One small training grant per simulated week, alongside the match. The "training"
+    /// source is what makes Facilities apply the Weight Room multiplier. Recovery is
+    /// deliberately not an XP source.
+    /// </summary>
+    private void AwardTrainingXp(string playerId, string seasonId, int week)
+    {
+        var progression = EnsureProgressionService();
+        var rules = progression?.GetXpRewardRules();
+        if (rules == null || rules.training_per_week <= 0) return;
+
+        progression.AddXp(playerId, rules.training_per_week, "training", $"{seasonId}:week:{week}:training");
     }
 
     private PlayerProgressionSaveData ConvertToLegacyFormat(PlayerProgressionState state)

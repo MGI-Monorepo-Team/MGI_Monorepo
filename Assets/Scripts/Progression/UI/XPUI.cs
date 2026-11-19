@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
@@ -99,6 +100,10 @@ using TMPro;
                 return;
             }
 
+            // A week can hold several entries (its match, its training grant, any CCAS
+            // duplicates), so the label comes from the week number, not the row position.
+            var weeks = WeekNumbers(prog);
+
             // Create new entries (Iterate backwards to show NEWEST first)
             for (int i = prog.Count - 1; i >= 0; i--)
             {
@@ -109,7 +114,7 @@ using TMPro;
 
                 if (texts.Length >= 3)
                 {
-                    texts[0].text = $"Week {i + 1}";
+                    texts[0].text = $"Week {weeks[i]}";
 
                     texts[1].text = FormatResult(entry.source);
 
@@ -126,12 +131,84 @@ using TMPro;
         }
 
         /// <summary>
+        /// Week number for each history entry. A new week starts at every match entry, and the
+        /// week's other entries (its weekly training grant, any CCAS duplicates opened before the
+        /// next match) belong to it. Entries before the first match count as week 1.
+        /// </summary>
+        public static List<int> WeekNumbers(IReadOnlyList<XpHistoryEntry> entries)
+        {
+            ComputeWeeks(entries, out var weeks, out _);
+            return weeks;
+        }
+
+        /// <summary>
+        /// XP summed per week (full precision), in order - one bar per week for the chart.
+        /// XP is career XP, so the history spans several seasons: bars are grouped by played
+        /// week (not by the "Week N" label, which restarts every season) and keep that label.
+        /// </summary>
+        public static List<KeyValuePair<int, float>> TotalsByWeek(IReadOnlyList<XpHistoryEntry> entries)
+        {
+            ComputeWeeks(entries, out var weeks, out var groups);
+            var totals = new List<KeyValuePair<int, float>>();
+            int lastGroup = -1;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (totals.Count > 0 && groups[i] == lastGroup)
+                    totals[totals.Count - 1] = new KeyValuePair<int, float>(weeks[i], totals[totals.Count - 1].Value + entries[i].xp_gained);
+                else
+                    totals.Add(new KeyValuePair<int, float>(weeks[i], entries[i].xp_gained));
+                lastGroup = groups[i];
+            }
+            return totals;
+        }
+
+        // weeks: the "Week N" label, counted from 1 within each season. groups: a counter that
+        // advances at every match entry, so entries of the same played week share a group even
+        // when two seasons' week numbers happen to match.
+        private static void ComputeWeeks(IReadOnlyList<XpHistoryEntry> entries, out List<int> weeks, out List<int> groups)
+        {
+            weeks = new List<int>(entries.Count);
+            groups = new List<int>(entries.Count);
+            int week = 0;
+            int group = 0;
+            string season = null;
+            foreach (var entry in entries)
+            {
+                if (SeasonManager.IsMatchSource(entry.source))
+                {
+                    group++;
+                    string entrySeason = SeasonIdOf(entry);
+                    // A match from a different season starts that season's week 1. Entries
+                    // without a season id (older saves, tests) stay in the current season.
+                    if (entrySeason != null && season != null && entrySeason != season) week = 0;
+                    if (entrySeason != null) season = entrySeason;
+                    week++;
+                }
+                weeks.Add(Mathf.Max(1, week));
+                groups.Add(group);
+            }
+        }
+
+        /// <summary>
+        /// Season id embedded in a season-scoped grant's event id ("{season}:week:N:match",
+        /// "{season}:week:N:training", "{season}:season_reward"), or null for any other entry.
+        /// </summary>
+        public static string SeasonIdOf(XpHistoryEntry entry)
+        {
+            string id = entry?.id;
+            if (string.IsNullOrEmpty(id)) return null;
+
+            int cut = id.IndexOf(":week:", System.StringComparison.Ordinal);
+            if (cut < 0) cut = id.IndexOf(":season_reward", System.StringComparison.Ordinal);
+            return cut > 0 ? id.Substring(0, cut) : null;
+        }
+
+        /// <summary>
         /// Builds a per-week XP bar chart entirely at runtime (mirroring how
         /// RefreshXPHistory() instantiates list rows) into the same scroll view
         /// content used by the list, so it needs no dedicated scene UI of its own.
-        /// Each bar's height is that entry's own xp_gained (not a running total),
-        /// so the chart answers "where did my XP come from, and when" the same way
-        /// the list view does, per the reviewed spec.
+        /// One bar per week: its height is that week's XP (match + training), not a running
+        /// total. The list view shows the per-source breakdown.
         /// </summary>
         private void RefreshXpChart()
         {
@@ -148,9 +225,10 @@ using TMPro;
                 return;
             }
 
-            // Bar heights use the full-precision gain so proportions stay accurate;
+            // Bar heights use the full-precision weekly total so proportions stay accurate;
             // only the printed labels are rounded to whole numbers.
-            float maxGain = Mathf.Max(1f, entries.Max(e => Mathf.Abs(e.xp_gained)));
+            var weekTotals = TotalsByWeek(entries);
+            float maxGain = Mathf.Max(1f, weekTotals.Max(t => Mathf.Abs(t.Value)));
             float barAreaHeight = Mathf.Max(10f, chartRowHeight - ChartValueLabelHeight - ChartIndexLabelHeight);
 
             var row = new GameObject("ChartRow", typeof(RectTransform), typeof(LayoutElement), typeof(HorizontalLayoutGroup));
@@ -168,9 +246,10 @@ using TMPro;
             hlg.childControlWidth = false;
             hlg.childControlHeight = false;
 
-            for (int i = 0; i < entries.Count; i++)
+            for (int i = 0; i < weekTotals.Count; i++)
             {
-                var entry = entries[i];
+                int week = weekTotals[i].Key;
+                float weekXp = weekTotals[i].Value;
 
                 // Each bar gets its own fixed-size column so a value label can sit
                 // above it and a week label below it, without fighting the row's
@@ -181,7 +260,7 @@ using TMPro;
                 columnRt.SetParent(row.transform, false);
                 columnRt.sizeDelta = new Vector2(chartBarWidth + 16f, chartRowHeight);
 
-                float heightRatio = Mathf.Abs(entry.xp_gained) / maxGain;
+                float heightRatio = Mathf.Abs(weekXp) / maxGain;
                 float barPixelHeight = Mathf.Max(2f, heightRatio * barAreaHeight);
 
                 var barGO = new GameObject("Bar", typeof(RectTransform), typeof(Image));
@@ -196,15 +275,14 @@ using TMPro;
                 // it - size has to be set directly here, or every bar renders at the
                 // same default size regardless of this loop's math.
                 barRt.sizeDelta = new Vector2(chartBarWidth, barPixelHeight);
-                barGO.GetComponent<Image>().color = entry.xp_gained >= 0 ? chartBarGainColor : chartBarLossColor;
+                barGO.GetComponent<Image>().color = weekXp >= 0 ? chartBarGainColor : chartBarLossColor;
 
-                CreateChartLabel(columnRt, "ValueLabel", $"+{XpFormat.ToDisplay(entry.xp_gained)}",
+                CreateChartLabel(columnRt, "ValueLabel", $"+{XpFormat.ToDisplay(weekXp)}",
                     new Vector2(0, ChartIndexLabelHeight + barPixelHeight + 2f), ChartValueLabelHeight, chartValueFontSize, Color.white);
 
-                // "Week N" mirrors the list view's own labeling convention exactly
-                // (RefreshXPHistory also calls a history entry "Week {index+1}") -
-                // per the reviewed spec, the chart's bars must be grouped by week.
-                CreateChartLabel(columnRt, "WeekLabel", $"W{i + 1}",
+                // The week number matches the list view's "Week N" labels (both come from
+                // WeekNumbers) - per the reviewed spec, the chart's bars are grouped by week.
+                CreateChartLabel(columnRt, "WeekLabel", $"W{week}",
                     Vector2.zero, ChartIndexLabelHeight, 10, new Color(1f, 1f, 1f, 0.7f));
             }
         }

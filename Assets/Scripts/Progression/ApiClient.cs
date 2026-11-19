@@ -19,9 +19,20 @@ public class PlayerProgressionSaveData
 public class TierData
 {
     public int min_xp;
+
+    // Derived, not configured: ProgressionService sets it to the next tier's min_xp - 1 (so the
+    // ranges are always contiguous) and to OpenEnded for the top tier. Only min_xp lives in
+    // progression.json. These are methods, not properties, so serializers leave them out.
+    public const int OpenEnded = -1;
     public int max_xp;
+
     public string display_name;
     public List<string> unlock_features;
+
+    public bool IsOpenEnded() => max_xp < 0;
+
+    /// <summary>"0 - 49" for a bounded tier, "150+" for the open-ended top tier.</summary>
+    public string XpRangeLabel() => IsOpenEnded() ? $"{min_xp}+" : $"{min_xp} - {max_xp}";
 }
 
 [Serializable]

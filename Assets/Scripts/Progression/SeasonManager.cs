@@ -95,12 +95,9 @@ public class SeasonManager : MonoBehaviour
         {
             if (Teams == null || Teams.Count == 0) return 0;
 
-            var sorted = Teams.OrderByDescending(t => t.stats.points)
-                              .ThenByDescending(t => t.stats.wins)
-                              .ToList();
-
-            var playerIndex = sorted.FindIndex(t => t.is_player_team);
-            return playerIndex >= 0 ? playerIndex + 1 : 0;
+            // Shared with the season-end XP reward (SeasonStandings), so the rank shown here is
+            // the placement that gets paid. Teams tied on points and wins share the better rank.
+            return SeasonStandings.PlacementOf(Teams, PlayerTeam);
         }
     }
 
@@ -168,15 +165,42 @@ public class SeasonManager : MonoBehaviour
         }
     }
 
-    public int LastXpGained
-    {
-        get
-        {
-            var entries = XpHistoryEntries;
-            if (entries.Count == 0) return 0;
+    /// <summary>
+    /// XP earned in the most recently simulated week, rounded for display: the match XP plus
+    /// that week's training XP. (The last history entry is no longer the match once a weekly
+    /// training grant follows it, so this can't just read the last entry.)
+    /// </summary>
+    public int LastXpGained => XpFormat.ToDisplay(LastWeekXp(XpHistoryEntries));
 
-            return XpFormat.ToDisplay(entries[entries.Count - 1].xp_gained);
+    public static bool IsMatchSource(string source) =>
+        !string.IsNullOrEmpty(source) && source.StartsWith("match_", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Index of the most recent match entry, or -1 if there is none.</summary>
+    public static int LastMatchIndex(IReadOnlyList<XpHistoryEntry> entries)
+    {
+        for (int i = entries.Count - 1; i >= 0; i--)
+        {
+            if (IsMatchSource(entries[i].source)) return i;
         }
+        return -1;
+    }
+
+    /// <summary>
+    /// Full-precision XP for the latest week: the most recent match entry plus the training
+    /// entries that follow it. Entries from other sources (e.g. CCAS duplicates) are excluded.
+    /// </summary>
+    public static float LastWeekXp(IReadOnlyList<XpHistoryEntry> entries)
+    {
+        int matchIndex = LastMatchIndex(entries);
+        if (matchIndex < 0) return 0f;
+
+        float total = entries[matchIndex].xp_gained;
+        for (int i = matchIndex + 1; i < entries.Count; i++)
+        {
+            if (!string.Equals(entries[i].source, "training", StringComparison.OrdinalIgnoreCase)) break;
+            total += entries[i].xp_gained;
+        }
+        return total;
     }
 
     /// <summary>
@@ -193,8 +217,15 @@ public class SeasonManager : MonoBehaviour
         }
     }
 
-    public string LastMatchXpSource =>
-        XpHistoryEntries.Count > 0 ? XpHistoryEntries[^1].source : null;
+    public string LastMatchXpSource
+    {
+        get
+        {
+            var entries = XpHistoryEntries;
+            int index = LastMatchIndex(entries);
+            return index >= 0 ? entries[index].source : null;
+        }
+    }
 
     // --- Backend Integration ---
     public void SimulateNextWeek(Action<SeasonSaveData> callback = null)

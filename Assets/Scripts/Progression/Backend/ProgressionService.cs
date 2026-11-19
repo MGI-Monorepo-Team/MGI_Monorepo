@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using SimpleJSON;
 
@@ -78,6 +79,15 @@ public class ProgressionService : MonoBehaviour
         var state = LoadProgressionStateFromDisk(playerId);
         if (state != null)
         {
+            // A stored tier is only recomputed when XP is next awarded, so a save written
+            // under different thresholds (or edited by hand) can disagree with its own XP.
+            // Reconcile it now, and write the fix back: Facilities reads the tier straight
+            // from progression_state.json for its upgrade gate.
+            if (ReconcileStoredTier(state))
+            {
+                SaveProgressionStateToDisk(state);
+            }
+
             _progressionCache[playerId] = state;
             return state;
         }
@@ -237,7 +247,34 @@ public class ProgressionService : MonoBehaviour
         return _progressionConfig?.GetAllTiers() ?? new Dictionary<string, TierData>();
     }
 
+    /// <summary>
+    /// Base XP amounts from progression.json (match, weekly training, season placement).
+    /// Null if the config is missing or incomplete - callers must not award XP then.
+    /// </summary>
+    public XpRewardRules GetXpRewardRules()
+    {
+        return _progressionConfig?.RewardRules;
+    }
+
    
+    /// <summary>
+    /// Sets state.current_tier to the tier its XP earns under the current config. Returns true
+    /// if it changed. Does nothing while the config is not loaded (CalculateTierForXp would
+    /// answer "rookie" and wrongly demote everyone).
+    /// </summary>
+    private bool ReconcileStoredTier(PlayerProgressionState state)
+    {
+        if (_progressionConfig == null) return false;
+
+        string expected = CalculateTierForXp(state.current_xp);
+        if (string.Equals(state.current_tier, expected, StringComparison.Ordinal)) return false;
+
+        Debug.Log($"[ProgressionService] Stored tier '{state.current_tier}' for {state.player_id} does not match " +
+                  $"{state.current_xp} XP; corrected to '{expected}'.");
+        state.current_tier = expected;
+        return true;
+    }
+
     private string CalculateTierForXp(float totalXp)
     {
         if (_progressionConfig == null)
@@ -474,18 +511,25 @@ public class ProgressionService : MonoBehaviour
     {
         private Dictionary<string, TierData> _tiers = new Dictionary<string, TierData>();
 
+        // Null when xp_reward_rules is missing or incomplete; callers must treat that as
+        // "no XP can be awarded" rather than guessing amounts.
+        public XpRewardRules RewardRules { get; private set; }
+
         public ProgressionConfig(JSONNode configJson)
         {
+            RewardRules = ParseRewardRules(configJson["xp_reward_rules"]);
+
             // Parse tier_progression section
             var tiersNode = configJson["tier_progression"];
             foreach (KeyValuePair<string, JSONNode> kvp in tiersNode)
             {
                 var tierName = kvp.Key;
                 var tierNode = kvp.Value;
+                // Only min_xp is configured; max_xp is derived below so the ranges can never
+                // leave a gap (or overlap) between tiers.
                 var tierData = new TierData
                 {
                     min_xp = tierNode["min_xp"].AsInt,
-                    max_xp = tierNode["max_xp"].AsInt,
                     display_name = tierNode["display_name"].Value,
                     unlock_features = new List<string>()
                 };
@@ -497,13 +541,65 @@ public class ProgressionService : MonoBehaviour
 
                 _tiers[tierName] = tierData;
             }
+
+            DeriveTierRanges(_tiers.Values);
+        }
+
+        /// <summary>
+        /// Each tier runs up to (but not including) the next tier's min_xp; the highest tier has
+        /// no upper bound. Display only - GetTierForXp uses min_xp alone.
+        /// </summary>
+        private static void DeriveTierRanges(IEnumerable<TierData> tiers)
+        {
+            var ordered = tiers.OrderBy(t => t.min_xp).ToList();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                ordered[i].max_xp = i + 1 < ordered.Count ? ordered[i + 1].min_xp - 1 : TierData.OpenEnded;
+            }
+        }
+
+        private static XpRewardRules ParseRewardRules(JSONNode node)
+        {
+            if (node == null || node.IsNull || !node.IsObject)
+            {
+                Debug.LogError("[ProgressionService] progression.json has no xp_reward_rules; no match, training or season XP can be awarded.");
+                return null;
+            }
+
+            var seasonRewards = node["season_rewards"];
+            var rules = new XpRewardRules();
+
+            // Evaluate every key (no short-circuit) so one run reports all missing values.
+            bool ok = true;
+            ok &= TryRead(node, "match_played", "xp_reward_rules.match_played", out rules.match_played);
+            ok &= TryRead(node, "win", "xp_reward_rules.win", out rules.win);
+            ok &= TryRead(node, "loss", "xp_reward_rules.loss", out rules.loss);
+            ok &= TryRead(node, "training_per_week", "xp_reward_rules.training_per_week", out rules.training_per_week);
+            ok &= TryRead(seasonRewards, "1st", "xp_reward_rules.season_rewards.1st", out rules.season_1st);
+            ok &= TryRead(seasonRewards, "2nd", "xp_reward_rules.season_rewards.2nd", out rules.season_2nd);
+            ok &= TryRead(seasonRewards, "3rd", "xp_reward_rules.season_rewards.3rd", out rules.season_3rd);
+
+            return ok ? rules : null;
+        }
+
+        private static bool TryRead(JSONNode parent, string key, string path, out int value)
+        {
+            if (parent == null || !parent.HasKey(key) || !parent[key].IsNumber)
+            {
+                Debug.LogError($"[ProgressionService] progression.json is missing a numeric value for {path}.");
+                value = 0;
+                return false;
+            }
+
+            value = parent[key].AsInt;
+            return true;
         }
 
         public string GetTierForXp(float totalXp)
         {
-            // Highest tier whose minimum has been reached. The config's max_xp values
-            // are whole numbers (49, 99, ...), so matching "min <= xp <= max" would
-            // leave fractional XP such as 99.5 in a gap that no tier covers.
+            // Highest tier whose minimum has been reached. Only min_xp is used, so fractional
+            // XP such as 99.5 can never fall in a gap between one tier's whole-number max and
+            // the next tier's min.
             string currentTier = "rookie";
             int bestMin = int.MinValue;
             foreach (var kvp in _tiers)
