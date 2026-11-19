@@ -1,4 +1,4 @@
-"""Simulation engine (schema v0.2, model v0.3).
+"""Simulation engine (schema v0.2, model v0.4).
 
 Simulates Monster Gridiron Deep Management seasons from our game data and
 returns rows in the contract format (see gos/schema.py). Validation and
@@ -7,13 +7,14 @@ export live in gos/validate.py and gos/export.py.
 import json
 import math
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 
 from gos import SCHEMA_VERSION
 from gos.config_loader import REPO_ROOT, load_repository_config
+from gos.validate import TIERS, tier_for as tier_of
 
-MODEL_VERSION = "0.3"
-MODELS = ("0.2", "0.3")
+MODEL_VERSION = "0.4"
+MODELS = ("0.2", "0.3", "0.4")
 
 
 TEAMS = [("Hellion", "Fire"), ("Droid", "Radiation"), ("Elemental", "Fire"), ("Creature", "Poison"),
@@ -39,7 +40,20 @@ def coach_from_record(rec):
     ctype = "ST" if rec["coach_type"] in ("ST", "S") else rec["coach_type"]
     rating = sum(rec[k] for k in ROLE_STATS[ctype]) / 4
     return {"id": rec["coach_id"], "name": rec["coach_name"], "type": ctype,
-            "rating": rating, "bonus": round(rating * 5)}
+            "rating": rating, "bonus": round(rating * 5), "salary": rec.get("salary", 0)}
+
+
+def hire_cost(coach):
+    """CoachesService.TryHireCoach: RoundToInt(salary x 1,000,000 / 52)."""
+    return round(coach["salary"] * 1_000_000 / 52)
+
+
+def fire_refund(coach):
+    """CoachesService.FireCoach: RoundToInt(hire cost x 0.5 x unserved share). games_served never
+    increments in Unity today, so the share is 1. Starter coaches were never paid and have no
+    contract, so they refund 0.
+    shortcut: always 50%, scale by weeks served once Unity increments games_served."""
+    return round(coach.get("paid", 0) * 0.5)
 
 
 def coach_pool():
@@ -68,23 +82,29 @@ def coach_by_name(name, pool=None):
     return matches[0]
 
 
-# facilities_config.json
-FACILITIES = {
-    "weight_room":  [(12000, {"PlayerStrengthBoost": 0.04}), (30000, {"PlayerStrengthBoost": 0.08}),
-                     (65000, {"PlayerStrengthBoost": 0.12}), (120000, {"PlayerStrengthBoost": 0.16}),
-                     (250000, {"PlayerStrengthBoost": 0.20})],
-    "film_room":    [(8000, {"PlayerIntelligenceBoost": 0.03}),
-                     (18000, {"PlayerIntelligenceBoost": 0.06, "GamePlanEffectiveness": 0.02}),
-                     (40000, {"PlayerIntelligenceBoost": 0.09, "GamePlanEffectiveness": 0.05}),
-                     (80000, {"PlayerIntelligenceBoost": 0.12, "GamePlanEffectiveness": 0.08}),
-                     (150000, {"PlayerIntelligenceBoost": 0.15, "GamePlanEffectiveness": 0.10})],
-    "rehab_center": [(10000, {"PlayerHealthBoost": 0.0}), (25000, {"PlayerHealthBoost": 0.02}),
-                     (50000, {"PlayerHealthBoost": 0.04}), (100000, {"PlayerHealthBoost": 0.06}),
-                     (200000, {"PlayerHealthBoost": 0.08})],
-}
-TIER_GATES = {"rookie": 2, "pro": 3, "all_star": 4, "legend": 5}          # facilities_config.json
-TIERS = [("rookie", 0), ("pro", 50), ("all_star", 100), ("legend", 150)]   # progression.json
-XP = {"played": 5, "win": 10, "loss": 2, "season": {1: 50, 2: 30, 3: 15}}  # progression.json
+# facilities_config.json: upgrade cost and benefits per level, level 1 first
+_FACILITY_CONFIG = load_repository_config().facilities
+FACILITIES = {d["facility_type_id"]: [(lvl["upgrade_cost"], lvl["benefits"])
+                                      for lvl in sorted(d["levels"], key=lambda lvl: lvl["level"])]
+              for d in _FACILITY_CONFIG["facility_definitions"]}
+TIER_GATES = _FACILITY_CONFIG["tier_upgrade_gates"]  # highest facility level each XP tier allows
+_XP_RULES = load_repository_config().progression["xp_reward_rules"]
+XP = {"played": _XP_RULES["match_played"], "win": _XP_RULES["win"], "loss": _XP_RULES["loss"],
+      # shortcut: training_per_week arrives with PR #94, 2 is its value until that merges
+      "training": _XP_RULES.get("training_per_week", 2),
+      "season": {1: _XP_RULES["season_rewards"]["1st"], 2: _XP_RULES["season_rewards"]["2nd"],
+                 3: _XP_RULES["season_rewards"]["3rd"]}}
+
+# CCAS packs, rarities and duplicate XP (phase2_config.json, the file DropConfigManager loads)
+_CCAS = load_repository_config().ccas_drop_config
+PACKS = {name: {"cost": p["cost"], "cards": p["guaranteed_cards"], "drops": p["drop_rates"]}
+         for name, p in _CCAS["pack_types"].items()}
+RARITY_TIER = {r: v["numeric_value"] for r, v in _CCAS["rarity_values"].items()}  # rarity = card tier
+DUPLICATE_XP = {r: _CCAS["duplicate_xp"][f"{r}_duplicate_xp"] for r in RARITY_TIER}  # 1.0x, no bonuses
+CARDS = {c["uid"]: c for c in load_repository_config().cards_catalog["cards"]}
+CARDS_BY_TIER = defaultdict(list)
+for _uid, _card in CARDS.items():
+    CARDS_BY_TIER[_card["cardTier"]].append(_uid)
 
 CONFIG = {
     "weeks_per_season": 10,      # LocalSeasonBackend.total_weeks
@@ -153,16 +173,26 @@ def round_robin(n, weeks):
     return rounds[:weeks]
 
 
-def tier_of(xp):
-    t = "rookie"
-    for name, lo in TIERS:
-        if xp >= lo: t = name
-    return t
+def floor_xp(xp):
+    """Total XP for the CSV, cut (not rounded) to 2 decimals so 149.996 never shows as 150.0
+    next to its real tier."""
+    return math.floor(xp * 100 + 1e-9) / 100  # 0.29 * 100 is 28.999..., the margin keeps it 29
 
 
 def match_xp_multiplier(levels):  # FacilitiesService.CalculateMatchXpMultiplier
     eff = facility_effects(levels)
     return 1 + eff["PlayerIntelligenceBoost"] + eff["GamePlanEffectiveness"]
+
+
+def training_xp_multiplier(levels):  # FacilitiesService.CalculateTrainingXpMultiplier
+    eff = facility_effects(levels)
+    return 1 + eff["PlayerStrengthBoost"] + eff["PlayerConditioningBoost"] + eff["FatigueResistance"]
+
+
+def shared_placement(rec, i):
+    """SeasonStandings.PlacementOf (PR #94): one more than the teams strictly ahead on points,
+    then wins. Points are wins x 2, so teams level on wins share the better place (1, 2, 2, 4)."""
+    return 1 + sum(1 for j in rec if rec[j]["w"] > rec[i]["w"])
 
 
 def coach_win_bonus(co):
@@ -186,7 +216,7 @@ def buy_upgrades(state, team):
     bought = []
     while True:
         gate = TIER_GATES[tier_of(state["xp"])]
-        opts = [(FACILITIES[f][lvl][0], f) for f, lvl in team["facilities"].items() if lvl < min(5, gate)]
+        opts = [(FACILITIES[f][lvl][0], f) for f, lvl in team["facilities"].items() if lvl < min(len(FACILITIES[f]), gate)]
         opts = [o for o in opts if o[0] <= state["coins"]]
         if not opts: return bought
         cost, f = min(opts)
@@ -195,16 +225,78 @@ def buy_upgrades(state, team):
         bought.append(f"{f}:{team['facilities'][f]}")
 
 
+# ---------------------------------------------------------------- v0.4 team growth
+def starter_collection(team_name, tier):
+    """The starter roster as real catalog cards: tier `tier` in every slot, tier 1 QB."""
+    owned = Counter()
+    for pos, n in Counter(SLOT_POS.values()).items():
+        t = 1 if pos == "QB" else tier
+        picks = [u for u, c in CARDS.items() if c["team"] == team_name and c["position5"] == pos and c["cardTier"] == t][:n]
+        assert len(picks) == n, f"catalog has no {n} {team_name} {pos} tier {t} cards"
+        owned.update(picks)
+    return owned
+
+
+def lineup(owned):
+    """Active roster: each slot gets the best owned card for its position, a card fills one slot.
+    An empty slot is tier 0."""
+    by_pos = defaultdict(list)
+    for uid, n in owned.items():
+        if n:  # a duplicate pays XP, it is not a second copy for the lineup
+            by_pos[CARDS[uid]["position5"]].append(CARDS[uid]["cardTier"])
+    for tiers in by_pos.values():
+        tiers.sort(reverse=True)
+    return {s: (by_pos[SLOT_POS[s]].pop(0) if by_pos[SLOT_POS[s]] else 0) for s in OFFENCE_SLOTS + DEFENCE_SLOTS}
+
+
+def open_pack(rng, owned, pack):
+    """Draw the pack's cards from the whole catalog (any team). Returns duplicate XP earned."""
+    p, dup_xp = PACKS[pack], 0
+    for _ in range(p["cards"]):
+        rarity = rng.choices(list(p["drops"]), weights=list(p["drops"].values()))[0]
+        uid = rng.choice(CARDS_BY_TIER[RARITY_TIER[rarity]])
+        if owned[uid]:
+            dup_xp += DUPLICATE_XP[rarity]
+        owned[uid] += 1
+    return dup_xp
+
+
+def spend_v04(rng, state, me, pool):
+    """Default spending policy (write-up, Nov 2026). 1) one pack a week, the best one affordable.
+    2) hire the best affordable coach that beats the current one, per role, refunding the one
+    replaced. Facilities get what is left (buy_upgrades runs after this). Returns (bought, dup_xp)."""
+    bought, dup_xp = [], 0
+    affordable = [n for n, p in PACKS.items() if p["cost"] <= state["coins"]]
+    if affordable:
+        pack = max(affordable, key=lambda n: PACKS[n]["cost"])
+        state["coins"] -= PACKS[pack]["cost"]
+        dup_xp = open_pack(rng, state["owned"], pack)
+        me["roster"] = lineup(state["owned"])
+        bought.append(f"pack:{pack}")
+    for t in COACH_TYPES:
+        cur = me["coaches"][t]["bonus"]
+        ok = [c for c in pool if c["type"] == t and c["bonus"] > cur and hire_cost(c) <= state["coins"]]
+        if ok:
+            c = max(ok, key=lambda c: (c["bonus"], -hire_cost(c)))
+            state["coins"] -= hire_cost(c)
+            state["coins"] += fire_refund(me["coaches"][t])
+            me["coaches"][t] = dict(c, paid=hire_cost(c))
+            bought.append(f"hire:{t}:{c['name']}")
+    return bought, dup_xp
+
+
 def run(runs, seasons, seed, mode="results", model=MODEL_VERSION):
     """mode results = coins from game results. mode lump = 1,200,000 at start (today).
-    model 0.3 = current coach model, 0.2 = legacy coach.json bonus (see module docstring)."""
+    model 0.4 = 0.3 plus team growth (cards into the roster, coach hiring),
+    0.3 = current coach model, 0.2 = legacy coach.json bonus (see module docstring)."""
     if model not in MODELS:
         raise ValueError(f"unknown model {model!r}, expected one of {MODELS}")
     rng = random.Random(seed)
     games, standings, journey = [], [], []
     c = CONFIG
-    pool = coach_pool() if model == "0.3" else legacy_coach_pool()
-    start_coaches = c["player_start_coaches"] if model == "0.3" else LEGACY_START_COACHES
+    pool = legacy_coach_pool() if model == "0.2" else coach_pool()
+    start_coaches = LEGACY_START_COACHES if model == "0.2" else c["player_start_coaches"]
+    grows = model == "0.4"
     for run_i in range(1, runs + 1):
         teams = [build_team(rng, n, e, c["ai_tiers"], pool) for n, e in TEAMS]
         me = next(t for t in teams if t["team_name"] == c["player_team"])
@@ -212,7 +304,10 @@ def run(runs, seasons, seed, mode="results", model=MODEL_VERSION):
         me["roster"]["qb"] = 1
         me["coaches"] = {t: coach_by_name(n, pool) for t, n in start_coaches.items()}
         state = {"coins": 1200000 if mode == "lump" else 0, "xp": 0.0}
-        if mode == "lump": buy_upgrades(state, me)
+        if grows:
+            state["owned"] = starter_collection(me["team_name"], c["player_start_roster_tier"])
+            me["roster"] = lineup(state["owned"])
+        if mode == "lump" and not grows: buy_upgrades(state, me)
         for s in range(1, seasons + 1):
             season_id = f"R{run_i:03d}-S{s:02d}"
             rec = {i: {"w": 0, "l": 0, "pf": 0, "pa": 0, "streak": 0} for i in range(len(teams))}
@@ -249,12 +344,18 @@ def run(runs, seasons, seed, mode="results", model=MODEL_VERSION):
                             base = XP["played"] + (XP["win"] if won else XP["loss"])
                             xp_gain = apply_xp_bonuses(base, match_xp_multiplier(me["facilities"]),
                                                        coach_win_bonus(me["coaches"]) if won else 0.0)
+                            # weekly training grant (PR #94): Weight Room multiplier, no coach bonus
+                            xp_gain += apply_xp_bonuses(XP["training"], training_xp_multiplier(me["facilities"]))
                             coins = c["coins_per_game"] + (c["coins_per_win"] if won else 0) if mode == "results" else 0
                             state["xp"] += xp_gain; state["coins"] += coins
-                            bought = buy_upgrades(state, me)
+                            bought = []
+                            if grows:
+                                bought, dup_xp = spend_v04(rng, state, me, pool)
+                                xp_gain += dup_xp; state["xp"] += dup_xp
+                            bought += buy_upgrades(state, me)
                             journey.append({"mode": mode, "run": run_i, "season": s, "week": week, "season_id": season_id,
                                             "result": "W" if won else "L", "xp_gained": round(xp_gain, 2),
-                                            "total_xp": round(state["xp"], 2), "tier": tier_of(state["xp"]),
+                                            "total_xp": floor_xp(state["xp"]), "tier": tier_of(state["xp"]),
                                             "coins_earned": coins, "wallet": state["coins"],
                                             "weight_room": me["facilities"]["weight_room"], "film_room": me["facilities"]["film_room"],
                                             "rehab_center": me["facilities"]["rehab_center"], "upgrades_bought": " ".join(bought),
@@ -268,15 +369,16 @@ def run(runs, seasons, seed, mode="results", model=MODEL_VERSION):
                                   "standing_points": r["w"] * c["points_per_win"], "points_for": r["pf"], "points_against": r["pa"],
                                   "point_diff": r["pf"] - r["pa"], "placement": place, "team_strength": round(strength(t), 2)})
                 if t is me:
+                    place = shared_placement(rec, i)  # the reward uses the tie rule, the table keeps a full order
                     season_base = XP["season"].get(place, 0)  # coach bonus does not apply to season XP
                     sxp = apply_xp_bonuses(season_base, match_xp_multiplier(me["facilities"])) if season_base else 0
                     scoins = c["coins_placement"].get(place, 0) if mode == "results" else 0
                     state["xp"] += sxp; state["coins"] += scoins
-                    bought = buy_upgrades(state, me)
+                    bought = buy_upgrades(state, me) if not grows else []
                     if journey:
                         journey[-1]["season_bonus_xp"] = round(sxp, 2); journey[-1]["season_bonus_coins"] = scoins
                         journey[-1]["placement"] = place; journey[-1]["wallet"] = state["coins"]
-                        journey[-1]["total_xp"] = round(state["xp"], 2); journey[-1]["tier"] = tier_of(state["xp"])
+                        journey[-1]["total_xp"] = floor_xp(state["xp"]); journey[-1]["tier"] = tier_of(state["xp"])
                         journey[-1]["upgrades_bought"] = (journey[-1]["upgrades_bought"] + " " + " ".join(bought)).strip()
                         for f in FACILITIES: journey[-1][f] = me["facilities"][f]
                         journey[-1]["team_strength"] = round(strength(me), 2)

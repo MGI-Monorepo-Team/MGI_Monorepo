@@ -1,9 +1,12 @@
 from collections import Counter, defaultdict 
 
+from gos.config_loader import load_repository_config
 from gos.schema import check_row
 
-TIERS = (("rookie", 0), ("pro", 50), ("all_star", 100), ("legend", 150))  # progression.json
-MAX_FACILITY_LEVEL = 5
+_CONFIG = load_repository_config()
+TIERS = tuple(sorted(((name, t["min_xp"]) for name, t in _CONFIG.progression["tier_progression"].items()),
+                     key=lambda tier: tier[1]))  # progression.json, lowest first
+MAX_FACILITY_LEVEL = max(d["max_level"] for d in _CONFIG.facilities["facility_definitions"])
 MAX_ROW_ERRORS = 20  
 
 

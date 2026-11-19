@@ -46,7 +46,7 @@ def test_lump_mode_pays_no_result_coins():
 
 def test_lump_sum_maxes_every_facility_by_season_two():
     """The pacing problem from the spec: 1,200,000 coins buys everything early."""
-    _, _, journey = engine.run(5, 2, seed=3, mode="lump")
+    _, _, journey = engine.run(5, 2, seed=3, mode="lump", model="0.3")
     end_s2 = [r for r in journey if r["season"] == 2 and r["week"] == WEEKS]
     assert all(r["weight_room"] + r["film_room"] + r["rehab_center"] == 15 for r in end_s2)
 
@@ -133,8 +133,8 @@ def test_v02_model_passes_validation_with_legacy_starters():
     assert row["coach_bonus_applied_percent"] == 1.25   # 0.5 + 0.5 + 0.25, as in the v0.2 fixtures
 
 
-def test_default_model_is_v03():
-    assert engine.run(1, 1, seed=5) == engine.run(1, 1, seed=5, model="0.3")
+def test_default_model_is_v04():
+    assert engine.run(1, 1, seed=5) == engine.run(1, 1, seed=5, model="0.4")
 
 
 def test_unknown_model_is_rejected():
@@ -146,3 +146,79 @@ def test_cli_writes_files(tmp_path, capsys):
     assert main(["--runs", "1", "--seasons", "1", "--out", str(tmp_path)]) == 0
     assert (tmp_path / "game_outcomes.csv").exists()
     assert "OK:" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- PR #94 XP rules
+def test_xp_amounts_come_from_progression_json():
+    assert (engine.XP["played"], engine.XP["win"], engine.XP["loss"], engine.XP["training"]) == (5, 10, 2, 2)
+    assert engine.XP["season"] == {1: 50, 2: 30, 3: 15}
+
+
+def test_training_xp_uses_the_weight_room():
+    # level 2: strength 0.08 + conditioning 0.04 + fatigue resistance 0.03 (facilities_config.json)
+    assert engine.training_xp_multiplier({"weight_room": 2, "film_room": 5, "rehab_center": 0}) == pytest.approx(1.15)
+
+
+def test_tiers_and_facilities_come_from_config():
+    assert engine.TIERS == (("rookie", 0), ("pro", 50), ("all_star", 100), ("legend", 150))
+    assert engine.TIER_GATES == {"rookie": 2, "pro": 3, "all_star": 4, "legend": 5}
+    assert [cost for cost, _ in engine.FACILITIES["weight_room"]] == [12000, 30000, 65000, 120000, 250000]
+
+
+def test_tied_teams_share_the_better_placement():
+    """SeasonStandings.PlacementOf: 1, 2, 2, 4."""
+    rec = {0: {"w": 8}, 1: {"w": 6}, 2: {"w": 6}, 3: {"w": 2}}
+    assert [engine.shared_placement(rec, i) for i in rec] == [1, 2, 2, 4]
+
+
+# ---------------------------------------------------------------- v0.4 team growth
+def test_hire_cost_matches_coaches_service():
+    assert engine.hire_cost({"salary": 1}) == 19231
+    assert engine.hire_cost({"salary": 15}) == 288462
+
+
+def test_starter_collection_gives_the_v03_starter_roster():
+    owned = engine.starter_collection("Hellion", 2)
+    roster = engine.lineup(owned)
+    assert sum(owned.values()) == 14
+    assert roster["qb"] == 1 and all(roster[s] == 2 for s in roster if s != "qb")
+
+
+def test_lineup_takes_the_best_owned_card_per_position():
+    owned = engine.starter_collection("Hellion", 2)
+    better = next(u for u, c in engine.CARDS.items() if c["position5"] == "OL" and c["cardTier"] == 5)
+    owned[better] += 1
+    roster = engine.lineup(owned)
+    assert sorted(roster[s] for s in ("ol1", "ol2", "ol3")) == [2, 2, 5]
+
+
+def test_v04_passes_validation_and_the_player_team_grows():
+    games, seasons, journey = engine.run(runs=2, seasons=5, seed=7, model="0.4")
+    assert validate_batch(games, seasons, journey, weeks_per_season=WEEKS) == []
+    first = next(r["team_strength"] for r in journey if r["run"] == 1)
+    last = [r["team_strength"] for r in journey if r["run"] == 1][-1]
+    assert last > first
+    assert any("pack:" in r["upgrades_bought"] for r in journey)
+
+
+def test_csv_total_xp_never_rounds_up_into_the_next_tier():
+    assert engine.floor_xp(149.996) == 149.99
+    assert engine.floor_xp(0.29) == 0.29 and engine.floor_xp(1.15) == 1.15
+
+
+def test_v04_still_buys_facilities():
+    _, _, journey = engine.run(runs=3, seasons=5, seed=7, model="0.4")
+    end = [r for r in journey if r["season"] == 5 and r["week"] == WEEKS]
+    assert all(r["weight_room"] + r["film_room"] + r["rehab_center"] > 0 for r in end)
+
+
+def test_replacing_a_hired_coach_refunds_half_its_cost():
+    assert engine.fire_refund({"paid": 19231}) == 9616   # Mathf.RoundToInt(9615.5), round half to even
+    assert engine.fire_refund({"name": "starter"}) == 0  # starters were never paid
+    assert engine.tier_of(149.996) == "all_star"
+
+
+def test_a_duplicate_card_fills_only_one_slot():
+    owned = engine.Counter({next(u for u, c in engine.CARDS.items() if c["position5"] == "OL" and c["cardTier"] == 5): 3})
+    roster = engine.lineup(owned)
+    assert sorted(roster[s] for s in ("ol1", "ol2", "ol3")) == [0, 0, 5]
