@@ -242,7 +242,8 @@ def lineup(owned):
     An empty slot is tier 0."""
     by_pos = defaultdict(list)
     for uid, n in owned.items():
-        by_pos[CARDS[uid]["position5"]] += [CARDS[uid]["cardTier"]] * n
+        if n:  # a duplicate pays XP, it is not a second copy for the lineup
+            by_pos[CARDS[uid]["position5"]].append(CARDS[uid]["cardTier"])
     for tiers in by_pos.values():
         tiers.sort(reverse=True)
     return {s: (by_pos[SLOT_POS[s]].pop(0) if by_pos[SLOT_POS[s]] else 0) for s in OFFENCE_SLOTS + DEFENCE_SLOTS}

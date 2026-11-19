@@ -216,3 +216,9 @@ def test_replacing_a_hired_coach_refunds_half_its_cost():
     assert engine.fire_refund({"paid": 19231}) == 9616   # Mathf.RoundToInt(9615.5), round half to even
     assert engine.fire_refund({"name": "starter"}) == 0  # starters were never paid
     assert engine.tier_of(149.996) == "all_star"
+
+
+def test_a_duplicate_card_fills_only_one_slot():
+    owned = engine.Counter({next(u for u, c in engine.CARDS.items() if c["position5"] == "OL" and c["cardTier"] == 5): 3})
+    roster = engine.lineup(owned)
+    assert sorted(roster[s] for s in ("ol1", "ol2", "ol3")) == [0, 0, 5]
