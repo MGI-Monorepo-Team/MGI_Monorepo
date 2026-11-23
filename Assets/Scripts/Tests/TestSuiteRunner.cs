@@ -163,6 +163,13 @@ public static class TestSuiteRunner
                 Subsystem = "Game outcome simulator -> Economy",
                 Description = "Applies simulator coin rewards once per stable result event.",
                 Run = GameOutcomeRewardTests.RunSuite
+            },
+            new SuiteDefinition
+            {
+                Name = "game-outcome-engine",
+                Subsystem = "In-game weekly game outcome engine",
+                Description = "Uses the active 14-card roster and hired coaches to calculate deterministic weekly results.",
+                Run = WeeklyGameOutcomeEngineTests.RunSuite
             }
         };
     }
