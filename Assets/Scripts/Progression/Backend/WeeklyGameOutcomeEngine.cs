@@ -37,16 +37,19 @@ public static class WeeklyGameOutcomeEngine
         ValidateTeam(team);
 
         var cardsBySlot = team.active_roster.ToDictionary(card => card.slot_id, StringComparer.OrdinalIgnoreCase);
-        float offence = UnitRating(cardsBySlot, OffenceSlots) * (1f + CoachBonus(team, "O") / 100f);
-        float defence = UnitRating(cardsBySlot, DefenceSlots) * (1f + CoachBonus(team, "D") / 100f);
-        float specialTeams = UnitRating(cardsBySlot, OffenceSlots.Concat(DefenceSlots)) *
+        float offenceRating = UnitRating(cardsBySlot, OffenceSlots);
+        float defenceRating = UnitRating(cardsBySlot, DefenceSlots);
+        float specialTeamsRating = UnitRating(cardsBySlot, OffenceSlots.Concat(DefenceSlots));
+        float offence = offenceRating * (1f + CoachBonus(team, "O") / 100f);
+        float defence = defenceRating * (1f + CoachBonus(team, "D") / 100f);
+        float specialTeams = specialTeamsRating *
                              (1f + CoachBonus(team, "ST") / 100f);
 
         return new TeamStrengthSummary
         {
-            offence_rating = offence,
-            defence_rating = defence,
-            special_teams_rating = specialTeams,
+            offence_rating = offenceRating,
+            defence_rating = defenceRating,
+            special_teams_rating = specialTeamsRating,
             strength = OffenceWeight * offence + DefenceWeight * defence + SpecialTeamsWeight * specialTeams
         };
     }
