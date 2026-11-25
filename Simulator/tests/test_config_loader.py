@@ -13,6 +13,7 @@ class StreamingAssetsConfigLoaderTests(unittest.TestCase):
 
         self.assertGreater(len(configuration.cards_catalog["cards"]), 0)
         self.assertGreater(len(configuration.teams), 0)
+        self.assertIn("pack_types", configuration.ccas_drop_config)
         self.assertEqual(499, len(configuration.coaches))
         self.assertIn("xp_bonus_rules", configuration.coach_bonus_rules)
         self.assertIn("facility_definitions", configuration.facilities)
@@ -48,6 +49,7 @@ class StreamingAssetsConfigLoaderTests(unittest.TestCase):
     def _write_required_configuration(streaming_assets: Path, win_xp: int) -> None:
         files = {
             "CCAS/cards_catalog.json": {"cards": [{"uid": "card-1"}]},
+            "CCAS/phase2_config.json": {"pack_types": {}},
             "Coaches/Database/team.json": [{"team_id": "team-1"}],
             "Coaches/coaches_schema_data.json": {"coach": [{"coach_id": "coach-1"}]},
             "Coaches/coaches_bonus_config.json": {"xp_bonus_rules": []},

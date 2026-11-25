@@ -21,6 +21,7 @@ class SimulatorConfiguration:
     """Raw, source-owned configuration consumed by the outcome simulator."""
 
     cards_catalog: dict[str, Any]
+    ccas_drop_config: dict[str, Any]
     teams: list[dict[str, Any]]
     coaches: list[dict[str, Any]]
     coach_bonus_rules: dict[str, Any]
@@ -33,6 +34,7 @@ class StreamingAssetsConfigLoader:
 
     _RELATIVE_PATHS = {
         "cards_catalog": Path("CCAS/cards_catalog.json"),
+        "ccas_drop_config": Path("CCAS/phase2_config.json"),
         "teams": Path("Coaches/Database/team.json"),
         "coaches": Path("Coaches/coaches_schema_data.json"),
         "coach_bonus_rules": Path("Coaches/coaches_bonus_config.json"),
@@ -51,6 +53,7 @@ class StreamingAssetsConfigLoader:
         loaded = {name: self._read_json(name, path) for name, path in self._RELATIVE_PATHS.items()}
 
         self._require_object("cards_catalog", loaded["cards_catalog"])
+        self._require_object("ccas_drop_config", loaded["ccas_drop_config"])
         self._require_list("teams", loaded["teams"])
         self._require_object("coaches", loaded["coaches"])
         self._require_list("coaches.coach", loaded["coaches"].get("coach"))
@@ -60,6 +63,7 @@ class StreamingAssetsConfigLoader:
 
         return SimulatorConfiguration(
             cards_catalog=loaded["cards_catalog"],
+            ccas_drop_config=loaded["ccas_drop_config"],
             teams=loaded["teams"],
             coaches=loaded["coaches"]["coach"],
             coach_bonus_rules=loaded["coach_bonus_rules"],
